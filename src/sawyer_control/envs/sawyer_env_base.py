@@ -32,7 +32,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             img_col_delta=300, #can range from  0-999
             img_row_delta=600, #can range from  0-999
     ):
-        Serializable.quick_init(self, locals())
+        # Serializable.quick_init(self, locals())
         MultitaskEnv.__init__(self)
         self.config = config[config_name]
         self.init_rospy(self.config.UPDATE_HZ)

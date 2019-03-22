@@ -15,7 +15,7 @@ class SawyerReachXYZEnv(SawyerEnvBase):
                  goal_high=None,
                  **kwargs
                  ):
-        Serializable.quick_init(self, locals())
+        # Serializable.quick_init(self, locals())
         SawyerEnvBase.__init__(self, **kwargs)
         if self.action_mode == 'torque':
             if goal_low is None:
