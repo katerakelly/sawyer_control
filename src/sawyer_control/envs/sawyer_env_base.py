@@ -70,11 +70,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             self._torque_act(action*self.torque_action_scale)
         return
 
-    def _position_reset(self):
-        target_ee_pos = self.pos_control_reset_position
-        angles = self.config.RESET_ANGLES
-        self.send_angle_action(angles, target_ee_pos)
-
     def _position_act(self, action):
         ee_pos = self._get_endeffector_pose()
         endeffector_pos = ee_pos[:3]
@@ -181,11 +176,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         if not self.reset_free:
             if self.action_mode == "position":
                 for i in range(5):
-                    # self._position_reset()
                     self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
                 while np.linalg.norm(self.pos_control_reset_position - self._get_endeffector_pose()) > 0.05:
                     for i in range(5):
-                        # self._position_reset()
                         self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
             else:
                 self.in_reset = True
