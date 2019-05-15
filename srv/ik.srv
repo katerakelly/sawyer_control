@@ -1,4 +1,4 @@
 float32[] ee_pos
-float32[] curr_joint_angles
+float32[] seed_angles
 ---
 float32[] joint_angles

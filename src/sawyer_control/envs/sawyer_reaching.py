@@ -15,7 +15,7 @@ class SawyerReachXYZEnv(SawyerEnvBase):
                  goal_high=None,
                  **kwargs
                  ):
-        # Serializable.quick_init(self, locals())
+        Serializable.quick_init(self, locals())
         SawyerEnvBase.__init__(self, **kwargs)
         if self.action_mode == 'torque':
             if goal_low is None:
@@ -44,8 +44,12 @@ class SawyerReachXYZEnv(SawyerEnvBase):
             r = -distances
         elif self.reward_type == 'hand_success':
             r = -(distances < self.indicator_threshold).astype(float)
+        elif self.reward_type == 'no_y':
+            dists = np.asarray([obs[:, 0] - goals[:, 0], obs[:, 1] - goals[:, 1]])
+            r = -np.linalg.norm(dists, axis=0)
         else:
             raise NotImplementedError("Invalid/no reward type.")
+        # print("REWARD INFO - R: {} | D: {} | O: {} | G: {}".format(r, distances, obs, goals))
         return r
 
     def _get_info(self):

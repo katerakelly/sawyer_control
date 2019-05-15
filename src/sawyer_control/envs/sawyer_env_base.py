@@ -31,8 +31,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             img_start_row=200, #can range from  0-999
             img_col_delta=300, #can range from  0-999
             img_row_delta=600, #can range from  0-999
+            height_2d=None,
     ):
-        # Serializable.quick_init(self, locals())
+        Serializable.quick_init(self, locals())
         MultitaskEnv.__init__(self)
         self.config = config[config_name]
         self.init_rospy(self.config.UPDATE_HZ)
@@ -60,6 +61,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         self.img_col_delta = img_col_delta
         self.img_row_delta = img_row_delta
 
+        self.height_2d = height_2d
 
     def _act(self, action):
         if self.action_mode == 'position':
@@ -68,14 +70,24 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             self._torque_act(action*self.torque_action_scale)
         return
 
+    def _position_reset(self):
+        target_ee_pos = self.pos_control_reset_position
+        angles = self.config.RESET_ANGLES
+        self.send_angle_action(angles, target_ee_pos)
+
     def _position_act(self, action):
         ee_pos = self._get_endeffector_pose()
         endeffector_pos = ee_pos[:3]
         target_ee_pos = (endeffector_pos + action)
+        if self.height_2d:
+            target_ee_pos[2] = self.height_2d
         target_ee_pos = np.clip(target_ee_pos, self.config.POSITION_SAFETY_BOX_LOWS, self.config.POSITION_SAFETY_BOX_HIGHS)
         target_ee_pos = np.concatenate((target_ee_pos, [self.config.POSITION_CONTROL_EE_ORIENTATION.x, self.config.POSITION_CONTROL_EE_ORIENTATION.y, self.config.POSITION_CONTROL_EE_ORIENTATION.z, self.config.POSITION_CONTROL_EE_ORIENTATION.w]))
         angles = self.request_ik_angles(target_ee_pos, self._get_joint_angles())
-        self.send_angle_action(angles, target_ee_pos)
+        if angles:
+            self.send_angle_action(angles, target_ee_pos)
+        else:
+            print("No IK solution\n target: {} | current: {}".format(target_ee_pos[:3], ee_pos))
 
     def _torque_act(self, action):
         if self.use_safety_box:
@@ -168,12 +180,28 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def _reset_robot(self):
         if not self.reset_free:
             if self.action_mode == "position":
-                for _ in range(5):
+                for i in range(5):
+                    # self._position_reset()
                     self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
+                while np.linalg.norm(self.pos_control_reset_position - self._get_endeffector_pose()) > 0.05:
+                    for i in range(5):
+                        # self._position_reset()
+                        self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
             else:
                 self.in_reset = True
                 self._safe_move_to_neutral()
                 self.in_reset = False
+
+    def move_to_pos(self, target_pos):
+        if self.action_mode == "position":
+            for i in range(5):
+                self._position_act(target_pos - self._get_endeffector_pose())
+            while np.linalg.norm(target_pos - self._get_endeffector_pose()) > 0.05:
+                for i in range(5):
+                    self._position_act(target_pos - self._get_endeffector_pose())
+        else:
+            raise RuntimeError("We cannot move to position in torque mode")
+
 
     def reset(self):
         self._reset_robot()
@@ -386,17 +414,17 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         except rospy.ServiceException as e:
             pass
 
-    def request_ik_angles(self, ee_pos, joint_angles):
+    def request_ik_angles(self, ee_pos, seed_angles):
         rospy.wait_for_service('ik')
         try:
             get_joint_angles = rospy.ServiceProxy('ik', ik, persistent=True)
-            resp = get_joint_angles(ee_pos, joint_angles)
+            resp = get_joint_angles(ee_pos, seed_angles)
 
             return (
                 resp.joint_angles
             )
         except rospy.ServiceException as e:
-            pass
+            print(e)
 
     """
     Multitask functions
