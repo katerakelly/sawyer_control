@@ -57,10 +57,10 @@ class SawyerReachXYZEnv(SawyerEnvBase):
     def _set_observation_space(self):
         if self.action_mode=='position':
             lows = np.hstack((
-                self.config.END_EFFECTOR_VALUE_LOW['position'],
+                self.config.POSITION_SAFETY_BOX_LOWS,
             ))
             highs = np.hstack((
-                self.config.END_EFFECTOR_VALUE_HIGH['position'],
+                self.config.POSITION_SAFETY_BOX_HIGHS,
             ))
         else:
             lows = np.hstack((

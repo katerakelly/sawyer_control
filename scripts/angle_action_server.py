@@ -9,6 +9,7 @@ def execute_action(action_msg):
     joint_names = arm.joint_names()
     joint_to_values = dict(zip(joint_names, action))
     duration = action_msg.duration
+    print(duration)
     ja = [joint_to_values[name] for name in arm.joint_names()]
     controller.move_with_impedance([ja], duration=duration)
     return angle_actionResponse(True)

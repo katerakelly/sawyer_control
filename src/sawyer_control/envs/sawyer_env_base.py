@@ -19,10 +19,10 @@ import copy
 class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def __init__(
             self,
-            action_mode='torque',
+            action_mode='position',
             use_safety_box=True,
             torque_action_scale=1,
-            position_action_scale=1/10,
+            position_action_scale=.05,
             config_name = 'base_config',
             fix_goal=False,
             max_speed = 0.05,
@@ -73,7 +73,10 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         endeffector_pos = ee_pos[:3]
         target_ee_pos = (endeffector_pos + action)
         target_ee_pos = np.clip(target_ee_pos, self.config.POSITION_SAFETY_BOX_LOWS, self.config.POSITION_SAFETY_BOX_HIGHS)
-        target_ee_pos = np.concatenate((target_ee_pos, [self.config.POSITION_CONTROL_EE_ORIENTATION.x, self.config.POSITION_CONTROL_EE_ORIENTATION.y, self.config.POSITION_CONTROL_EE_ORIENTATION.z, self.config.POSITION_CONTROL_EE_ORIENTATION.w]))
+        f = self.config.POSITION_CONTROL_EE_ORIENTATION
+        orientation = np.array([f.x, f.y, f.z, f.w])
+        #orientation = self.config.POSITION_CONTROL_ORIENTATION
+        target_ee_pos = np.concatenate((target_ee_pos, orientation))
         angles = self.request_ik_angles(target_ee_pos, self._get_joint_angles())
         self.send_angle_action(angles, target_ee_pos)
 
@@ -124,7 +127,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         info = self._get_info()
         done = False
         return observation, reward, done, info
-    
+
     def _get_obs(self):
         angles, velocities, endpoint_pose = self.request_observation()
         obs = np.hstack((
@@ -137,7 +140,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def compute_rewards(self, actions, obs, goals):
         pass
-    
+
     def _get_info(self):
         return dict()
 
@@ -156,7 +159,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         VELOCITY_THRESHOLD = .002 * np.ones(7)
         no_velocity = (velocities < VELOCITY_THRESHOLD).all()
         return close_to_desired_reset_pos and no_velocity
-    
+
     def _check_reset_angles_within_threshold(self):
         desired_neutral = self.AnglePDController._des_angles
         desired_neutral = np.array([desired_neutral[joint] for joint in self.config.JOINT_NAMES])
@@ -319,9 +322,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             highs,
             dtype=np.float32,
         )
-            
-    """ 
-    ROS Functions 
+
+    """
+    ROS Functions
     """
 
     def init_rospy(self, update_hz):
@@ -377,11 +380,11 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
     def request_angle_action(self, angles, pos):
         dist = np.linalg.norm(self._get_endeffector_pose() - pos[:3])
-        duration = dist/self.max_speed
+        duration = (dist/self.max_speed)
         rospy.wait_for_service('angle_action')
         try:
             execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-            execute_action(angles, duration)
+            execute_action(angles=angles, duration=duration)
             return None
         except rospy.ServiceException as e:
             pass
@@ -396,6 +399,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
                 resp.joint_angles
             )
         except rospy.ServiceException as e:
+            print(e)
             pass
 
     """
