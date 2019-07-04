@@ -378,9 +378,46 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         except rospy.ServiceException as e:
             print(e)
 
-    def request_angle_action(self, angles, pos):
-        dist = np.linalg.norm(self._get_endeffector_pose() - pos[:3])
-        duration = (dist/self.max_speed)
+    def request_angle_action(self, angles, desired_pose, clip_joints=True):
+        _, _, curr_pose = self.request_observation()
+
+        if clip_joints:
+            # clip the joint angles to avoid contortions
+            curr_joint_angles = self._get_joint_angles()
+            max_joint_speed = np.ones(len(curr_joint_angles)) * .2
+            max_time = 1.0
+            old_angles = angles
+            angle_diff = angles - curr_joint_angles
+            angle_diff = np.clip(angle_diff, -1 * max_joint_speed * max_time, max_joint_speed * max_time)
+            angles = curr_joint_angles + angle_diff
+
+            if np.any(old_angles - angles):
+                print('clipped joint angles')
+                print(old_angles, '\n', angles)
+
+        # control the speed by computing an appropriate action duration
+        #print('\n REQUESTING ACTION')
+        #print('old joints', self._get_joint_angles())
+        #print('new joints', angles)
+        pos_dist = np.linalg.norm(curr_pose[:3] - desired_pose[:3])
+        pos_duration = (pos_dist / self.max_speed) * 1
+        # compute a rough distance between quaternions
+        quat_dist = 1 - np.abs(np.inner(curr_pose[3:], desired_pose[3:]))
+        # the max position distance is about .07 (due to action scaling), so we scale by 0.07 to make them about the same
+        quat_duration = (quat_dist / self.max_speed) * .07
+        # this may not work because the quat distance can be zero while the joint angle distance is large
+        # compute the distance between the current wrist joint angle and the one output by the IK
+        # wrist ranges through 3pi, -4.7 to 4.7 so the max this can be is 9.4
+        # if we want the outer point of the wrist cuff to travel at no more than max_speed, and the wrist radius is about 5cm, then the max duration for a full 3pi should be about 9.4 seconds, + 20% for safety is 11.28 seconds
+        # this calculation comes out to a multiplier of .06 but .12 looks safer in practice, probably because this doesn't take into account that all the joints moving together can make the ee move much faster
+        angles_dist = np.abs(angles - self._get_joint_angles())
+        angles_dist = max(angles_dist)
+        angles_duration = (angles_dist / self.max_speed) * .2
+        print('durations', pos_duration, quat_duration, angles_duration)
+        duration = max(pos_duration, quat_duration, angles_duration)
+        if duration > 7:
+            print('wanted to do crazy trajectory')
+            raise(Exception)
         rospy.wait_for_service('angle_action')
         try:
             execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
