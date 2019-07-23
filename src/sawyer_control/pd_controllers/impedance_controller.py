@@ -58,7 +58,7 @@ class ImpedanceController():
             self.control_rate.sleep()
             time = rospy.get_time()
 
-        for i in range(10):
+        for i in range(1):
             command = JointCommand()
             command.mode = JointCommand.POSITION_MODE
             command.names = jointnames
