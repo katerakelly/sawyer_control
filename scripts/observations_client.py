@@ -12,7 +12,8 @@ def request_observation():
                 obs.angles,
                 obs.velocities,
                 obs.torques,
-                obs.endpoint_pose
+                obs.endpoint_pose,
+                obs.endpoint_velocity
         )
     except rospy.ServiceException as e:
         print(e)

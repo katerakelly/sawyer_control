@@ -108,11 +108,11 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         return angles % (2*np.pi)
 
     def _get_joint_angles(self):
-        angles, _, _= self.request_observation()
+        angles, _, _, _ = self.request_observation()
         return angles
 
     def _get_endeffector_pose(self):
-        _, _, endpoint_pose = self.request_observation()
+        _, _, endpoint_pose, _ = self.request_observation()
         return endpoint_pose[:3]
 
     def compute_angle_difference(self, angles1, angles2):
@@ -373,13 +373,14 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             return (
                     np.array(obs.angles),
                     np.array(obs.velocities),
-                    np.array(obs.endpoint_pose)
+                    np.array(obs.endpoint_pose),
+                    np.array(obs.endpoint_velocity)
             )
         except rospy.ServiceException as e:
             print(e)
 
     def request_angle_action(self, angles, desired_pose, clip_joints=True):
-        _, _, curr_pose = self.request_observation()
+        _, _, curr_pose, _ = self.request_observation()
 
         if clip_joints:
             # clip the joint angles to avoid contortions
