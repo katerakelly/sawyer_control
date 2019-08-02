@@ -39,6 +39,7 @@ class PositionController():
         # self.action_subscriber = rospy.Subscriber('/robot/limb/right/joint_command', JointCommand, queue_size=100)
         self.control_rate = rospy.Rate(control_rate)
 
+        # get a new action 10 times per second
         self.action_update_rate = rospy.Rate(10)
         self.move_calls_between_update = 0
 
@@ -50,6 +51,7 @@ class PositionController():
         self.force_check_interval = 1
         self.last_safe_position = self.limb.joint_angles()
 
+        # will call self.move() control_rate times per second
         self.move_timer = rospy.Timer(rospy.Duration(1.0 / control_rate), self.move)
 
     def update_plan(self, waypoints, duration=1.5):
@@ -62,18 +64,19 @@ class PositionController():
         if not waypoints:
             return
 
-        rospy.logerr(self.move_calls_between_update)
         self.move_calls_between_update = 0
 
         self.prev_joint = np.array([self.limb.joint_angle(j) for j in self.jointnames])
         self.waypoints = np.array([self.prev_joint] + waypoints)
 
+        # plot a course to the goal position given a desired duration (usually computed from safety bounds)
         self.spline = CSpline(self.waypoints, duration)
 
         self.start_time = rospy.get_time()  # in seconds
         # finish_time = start_time + duration  # in seconds
 
         # while time < finish_time:
+        # wait for 1/10 seconds
         self.action_update_rate.sleep()
 
     def move(self, timer_event):
