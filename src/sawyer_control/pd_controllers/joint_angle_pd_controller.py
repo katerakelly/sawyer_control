@@ -23,7 +23,6 @@ class AnglePDController(object):
         # create cuff disable publisher
         cuff_ns = 'robot/limb/right/suppress_cuff_interaction'
         self._pub_cuff_disable = rospy.Publisher(cuff_ns, Empty, queue_size=1)
-
         reset_angles = config.RESET_ANGLES
         self.joint_names = config.JOINT_NAMES
         self._des_angles = dict(zip(self.joint_names, reset_angles))

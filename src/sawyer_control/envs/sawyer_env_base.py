@@ -63,6 +63,8 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
         self.height_2d = height_2d
 
+        self.prev_torque_angle_pos = self._get_joint_angles()
+
     def _act(self, action):
         if self.action_mode == 'position':
             self._position_act(action * self.position_action_scale)
@@ -84,28 +86,52 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         else:
             print("No IK solution\n target: {} | current: {}".format(target_ee_pos[:3], ee_pos))
 
+    def _get_pd_torques(self, error, p_coeff=150, d_coeff=0):
+        """Proportional-Derivative controller used to move joint angles to a given position."""
+        joint_velocities = self._get_joint_velocities()
+        torques = -p_coeff*error - d_coeff*joint_velocities
+        # PID command to hold still: SENDING ACTION: [ 2.47852817e-01  3.85983616e-01  3.00000000e+00  4.79142368e-01
+        #  -4.29153442e-06  4.64792192e-01  4.91886228e-01]
+
+        return torques
+
     def _torque_act(self, action):
+        # print("INIT ACTION: " + str(action))
+        hold_position_mask = np.array(action == 0, dtype=np.float32)  # 1 if nonzero torque is commanded
+        pid_action = self._get_pd_torques(self._get_joint_angles() - self.prev_torque_angle_pos)
+        pid_action = self._get_pd_torques(self._get_joint_angles() - self.config.RESET_ANGLES)
+        # action += hold_position_mask * pid_action
+
         if self.use_safety_box:
             if self.in_reset:
                 safety_box = self.config.RESET_SAFETY_BOX
             else:
                 safety_box = self.config.TORQUE_SAFETY_BOX
-            self.get_latest_pose_jacobian_dict()
-            pose_jacobian_dict_of_joints_not_in_box = self.get_pose_jacobian_dict_of_joints_not_in_box(safety_box)
-            if len(pose_jacobian_dict_of_joints_not_in_box) > 0:
-                forces_dict = self._get_adjustment_forces_per_joint_dict(pose_jacobian_dict_of_joints_not_in_box, safety_box)
-                torques = np.zeros(7)
-                for joint in forces_dict:
-                    jacobian = pose_jacobian_dict_of_joints_not_in_box[joint][1]
-                    force = forces_dict[joint]
-                    torques = torques + np.dot(jacobian.T, force).T
-                torques[-1] = 0 #we don't need to move the wrist
-                action = torques
+            print(self.get_latest_pose_jacobian_dict().keys())
+            ee_info = self.pose_jacobian_dict['_hand']
+            if ee_info:
+                 forces_dict = self._get_adjustment_forces_per_joint_dict(ee_info, safety_box)
+
+
+            # self.get_latest_pose_jacobian_dict()
+            # pose_jacobian_dict_of_joints_not_in_box = self.get_pose_jacobian_dict_of_joints_not_in_box(safety_box)
+            # if len(pose_jacobian_dict_of_joints_not_in_box) > 0:
+            #     forces_dict = self._get_adjustment_forces_per_joint_dict(pose_jacobian_dict_of_joints_not_in_box, safety_box)
+            #     torques = np.zeros(7)
+            #     for joint in forces_dict:
+            #         jacobian = pose_jacobian_dict_of_joints_not_in_box[joint][1]
+            #         force = forces_dict[joint]
+            #         torques = torques + np.dot(jacobian.T, force).T
+            #     torques[-1] = 0 #we don't need to move the wrist
+            #     action = torques
         if self.in_reset:
             action = np.clip(action, self.config.RESET_TORQUE_LOW, self.config.RESET_TORQUE_HIGH)
         else:
             action = np.clip(np.asarray(action), self.config.JOINT_TORQUE_LOW, self.config.JOINT_TORQUE_HIGH)
+        print(action)
         self.send_action(action)
+        print("SENDING ACTION: " + str(action))
+        self.prev_torque_angle_pos = self._get_joint_angles()  # save joint angles before moving
         self.rate.sleep()
 
     def _wrap_angles(self, angles):
@@ -114,6 +140,10 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def _get_joint_angles(self):
         angles, _, _= self.request_observation()
         return angles
+
+    def _get_joint_velocities(self):
+        _, velocities, _= self.request_observation()
+        return velocities
 
     def _get_endeffector_pose(self):
         _, _, endpoint_pose = self.request_observation()
@@ -182,7 +212,10 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
                         self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
             else:
                 self.in_reset = True
-                self._safe_move_to_neutral()
+                for i in range(5):
+                    self.request_angle_action(self.config.RESET_ANGLES, self.pos_control_reset_position)
+                while np.linalg.norm(self._get_joint_angles() - self.config.RESET_ANGLES) > 0.05:
+                    self.request_angle_action(self.config.RESET_ANGLES, self.pos_control_reset_position)
                 self.in_reset = False
 
     def move_to_pos(self, target_pos):
@@ -195,7 +228,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         else:
             raise RuntimeError("We cannot move to position in torque mode")
 
-
     def reset(self):
         self._reset_robot()
         self._state_goal = self.sample_goal()
@@ -203,6 +235,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
     def get_latest_pose_jacobian_dict(self):
         self.pose_jacobian_dict = self._get_robot_pose_jacobian_client()
+        return self.pose_jacobian_dict
 
     def _get_robot_pose_jacobian_client(self):
         rospy.wait_for_service('get_robot_pose_jacobian')
