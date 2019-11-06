@@ -1,4 +1,5 @@
 float32[] angles
 float32 duration
+float32 action_duration
 ---
 bool data

@@ -1,11 +1,16 @@
 import numpy as np
 import rospy
 import gym
+
 from gym.spaces import Box
 from sawyer_control.pd_controllers.joint_angle_pd_controller import AnglePDController
 from sawyer_control.core.serializable import Serializable
 from sawyer_control.core.multitask_env import MultitaskEnv
 from sawyer_control.configs.config import config_dict as config
+
+import sys
+sys.path.remove('/home/justin/ros_ws/src/sawyer_control/src')
+
 from sawyer_control.srv import observation
 from sawyer_control.srv import getRobotPoseAndJacobian
 from sawyer_control.srv import ik
@@ -15,6 +20,7 @@ from sawyer_control.msg import actions
 import abc
 import cv2
 import copy
+import collections
 
 class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def __init__(
@@ -22,7 +28,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             action_mode='torque',
             use_safety_box=True,
             torque_action_scale=1,
-            position_action_scale=1/10,
+            position_action_scale=0.1,
             config_name = 'base_config',
             fix_goal=False,
             max_speed = 0.05,
@@ -32,6 +38,8 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             img_col_delta=300, #can range from  0-999
             img_row_delta=600, #can range from  0-999
             height_2d=None,
+            constant_hz=False,
+            **kwargs  # to get rid of unused kwargs
     ):
         Serializable.quick_init(self, locals())
         MultitaskEnv.__init__(self)
@@ -63,7 +71,12 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
         self.height_2d = height_2d
 
-        self.prev_torque_angle_pos = self._get_joint_angles()
+        self.torque_window_size = 2
+        # Use a deque if the window size becomes too large?
+        self.torque_window = [np.asarray([0.0 for _ in range(7)]) for _ in range(self.torque_window_size)]
+
+        self.constant_hz = constant_hz
+        print("CONSTANT HZ? " + str(self.constant_hz))
 
     def _act(self, action):
         if self.action_mode == 'position':
@@ -73,6 +86,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         return
 
     def _position_act(self, action):
+        print("ACTION: " + str(action))
         ee_pos = self._get_endeffector_pose()
         endeffector_pos = ee_pos[:3]
         target_ee_pos = (endeffector_pos + action)
@@ -86,52 +100,92 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         else:
             print("No IK solution\n target: {} | current: {}".format(target_ee_pos[:3], ee_pos))
 
-    def _get_pd_torques(self, error, p_coeff=150, d_coeff=0):
+    def _get_pd_torques(self, error, p_coeff=150, d_coeff=5):
         """Proportional-Derivative controller used to move joint angles to a given position."""
         joint_velocities = self._get_joint_velocities()
         torques = -p_coeff*error - d_coeff*joint_velocities
+        # print("P: " + str(-p_coeff*error) + " | D: " + str(-d_coeff*joint_velocities))
         # PID command to hold still: SENDING ACTION: [ 2.47852817e-01  3.85983616e-01  3.00000000e+00  4.79142368e-01
         #  -4.29153442e-06  4.64792192e-01  4.91886228e-01]
+
+
+        # Find how much they have exceeded max torques, rescale torques
+        # Make it so it is double max possible torque (so it can counteract completely in the other direction).
+        fraction_max_torque = torques / self.config.MAX_TORQUES
+        # print(np.max(fraction_max_torque))
+        torques /= (np.max(fraction_max_torque) / 2.0)
 
         return torques
 
     def _torque_act(self, action):
         # print("INIT ACTION: " + str(action))
-        hold_position_mask = np.array(action == 0, dtype=np.float32)  # 1 if nonzero torque is commanded
-        pid_action = self._get_pd_torques(self._get_joint_angles() - self.prev_torque_angle_pos)
-        pid_action = self._get_pd_torques(self._get_joint_angles() - self.config.RESET_ANGLES)
+        # hold_position_mask = np.array(action == 0, dtype=np.float32)  # 1 if nonzero torque is commanded
+        # pid_action = self._get_pd_torques(self._get_joint_angles() - self.prev_torque_angle_pos)
+        # pid_action = self._get_pd_torques(self._get_joint_angles() - self.config.RESET_ANGLES)
         # action += hold_position_mask * pid_action
+        curr_joint_angles, curr_velocities, ee_pose = self.request_observation()
 
         if self.use_safety_box:
             if self.in_reset:
                 safety_box = self.config.RESET_SAFETY_BOX
             else:
                 safety_box = self.config.TORQUE_SAFETY_BOX
-            print(self.get_latest_pose_jacobian_dict().keys())
-            ee_info = self.pose_jacobian_dict['_hand']
-            if ee_info:
-                 forces_dict = self._get_adjustment_forces_per_joint_dict(ee_info, safety_box)
+            ee_safety_box = self.config.TORQUE_EE_SAFETY_BOX
+            # ee_info = np.asarray(self.pose_jacobian_dict['_hand'][0])
+            ee_info = ee_pose[:3]
+            # print(ee_info)
+            use_ee_pd_controller = False
+            if use_ee_pd_controller:
+                if not ee_safety_box.contains(ee_info):
+                    desired_ee = np.max([np.min([ee_info, ee_safety_box.high], axis=0), ee_safety_box.low], axis=0)
+                    full_ee_state = np.concatenate((desired_ee, ee_pose[3:]))
+                    # safe_joint_angles = self.request_ik_angles(full_ee_state, curr_joint_angles)
+                    safe_joint_angles = self.request_ik_angles(full_ee_state, self.config.RESET_ANGLES)
+                    if not safe_joint_angles:
+                        print("No IK solution. Moving to default position.")
+                        safe_joint_angles = self.config.RESET_ANGLES
+                    safety_adjustment_torques = self._get_pd_torques(curr_joint_angles - safe_joint_angles)
+                    safety_adjustment_torques[-1] = 0 #we don't need to move the wrist
+                    # print(safety_adjustment_torques)
+                    action = safety_adjustment_torques  # add the adjustment torques in
+
+            self.get_latest_pose_jacobian_dict()
+            pose_jacobian_dict_of_joints_not_in_box = self.get_pose_jacobian_dict_of_joints_not_in_box(safety_box)
+            if len(pose_jacobian_dict_of_joints_not_in_box) > 0:
+                # print(pose_jacobian_dict_of_joints_not_in_box)
+                forces_dict = self._get_adjustment_forces_per_joint_dict(pose_jacobian_dict_of_joints_not_in_box, safety_box)
+                torques = np.zeros(7)
+                for joint in forces_dict:
+                    jacobian = pose_jacobian_dict_of_joints_not_in_box[joint][1]
+                    force = forces_dict[joint]
+                    torques = torques + np.dot(jacobian.T, force).T
+                torques[-1] = 0 #we don't need to move the wrist
+                action = torques
+        exceeds_max_velocity = np.array(np.abs(curr_velocities) > self.config.MAX_VELOCITIES, dtype=np.int32)
+        same_direction = np.array(curr_velocities * action > 0, dtype=np.int32)
+        if np.sum(exceeds_max_velocity * same_direction) > 0:
+            print("MASK: " + str(exceeds_max_velocity * same_direction))
+        action *= (1 - exceeds_max_velocity * same_direction)
+
+        ## Don't do smoothing - too hard to learn
+        # self.torque_window.append(action)
+        # self.torque_window.pop(0)
+        action += self.config.GRAVITY_COMP_ADJUSTMENT
+        # action = (self.torque_window[0]*0.25 + self.torque_window[1] * 0.75)
 
 
-            # self.get_latest_pose_jacobian_dict()
-            # pose_jacobian_dict_of_joints_not_in_box = self.get_pose_jacobian_dict_of_joints_not_in_box(safety_box)
-            # if len(pose_jacobian_dict_of_joints_not_in_box) > 0:
-            #     forces_dict = self._get_adjustment_forces_per_joint_dict(pose_jacobian_dict_of_joints_not_in_box, safety_box)
-            #     torques = np.zeros(7)
-            #     for joint in forces_dict:
-            #         jacobian = pose_jacobian_dict_of_joints_not_in_box[joint][1]
-            #         force = forces_dict[joint]
-            #         torques = torques + np.dot(jacobian.T, force).T
-            #     torques[-1] = 0 #we don't need to move the wrist
-            #     action = torques
+        # Limit wrist motion
+        if action[-1] > 0 and curr_joint_angles[-1] > self.config.WRIST_ANGLE_HIGH:
+            action[-1] = 0
+        if action[-1] < 0 and curr_joint_angles[-1] < self.config.WRIST_ANGLE_LOW:
+            action[-1] = 0
+
         if self.in_reset:
             action = np.clip(action, self.config.RESET_TORQUE_LOW, self.config.RESET_TORQUE_HIGH)
         else:
             action = np.clip(np.asarray(action), self.config.JOINT_TORQUE_LOW, self.config.JOINT_TORQUE_HIGH)
-        print(action)
+        # print("FINAL ACTION: " + str(action))
         self.send_action(action)
-        print("SENDING ACTION: " + str(action))
-        self.prev_torque_angle_pos = self._get_joint_angles()  # save joint angles before moving
         self.rate.sleep()
 
     def _wrap_angles(self, angles):
@@ -160,6 +214,8 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         reward = self.compute_reward(action, self.convert_ob_to_goal(observation), self._state_goal)
         info = self._get_info()
         done = False
+        ee_pos = observation[-7:-4]
+        # print("R:" + str(reward) + " | O: " + str(ee_pos) + " | G: " + str(self._state_goal))
         return observation, reward, done, info
     
     def _get_obs(self):
@@ -204,19 +260,21 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
     def _reset_robot(self):
         if not self.reset_free:
-            if self.action_mode == "position":
-                for i in range(5):
-                    self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
-                while np.linalg.norm(self.pos_control_reset_position - self._get_endeffector_pose()) > 0.05:
-                    for i in range(5):
-                        self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
-            else:
-                self.in_reset = True
-                for i in range(5):
-                    self.request_angle_action(self.config.RESET_ANGLES, self.pos_control_reset_position)
-                while np.linalg.norm(self._get_joint_angles() - self.config.RESET_ANGLES) > 0.05:
-                    self.request_angle_action(self.config.RESET_ANGLES, self.pos_control_reset_position)
-                self.in_reset = False
+            # if self.action_mode == "position":
+            #     for i in range(5):
+            #         self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
+            #     # while np.linalg.norm(self.pos_control_reset_position - self._get_endeffector_pose()) > 0.05:
+            #     #     for i in range(5):
+            #     #         self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
+            # else:
+            self.in_reset = True
+            print("STARTING RESET")
+            while np.linalg.norm(self._get_joint_angles() - self.config.RESET_ANGLES) > 0.05:
+                for i in range(3):
+                    self.request_angle_action(self.config.RESET_ANGLES, self.pos_control_reset_position, reset=True)
+                self.request_angle_action(self.config.RESET_ANGLES, self.pos_control_reset_position, reset=True)
+            print("FINISHED RESET")
+            self.in_reset = False
 
     def move_to_pos(self, target_pos):
         if self.action_mode == "position":
@@ -429,16 +487,78 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         except rospy.ServiceException as e:
             print(e)
 
-    def request_angle_action(self, angles, pos):
-        dist = np.linalg.norm(self._get_endeffector_pose() - pos[:3])
-        duration = dist/self.max_speed
+
+    def request_angle_action_constant_rate(self, angles, desired_pose, clip_joints=True):
+        _, _, curr_pose, = self.request_observation()
+
+        if clip_joints:
+            # clip the joint angles to avoid contortions
+            curr_joint_angles = self._get_joint_angles()
+            max_joint_speed = np.ones(len(curr_joint_angles)) * .2
+            max_time = 1.0
+            old_angles = angles
+            angle_diff = angles - curr_joint_angles
+            angle_diff = np.clip(angle_diff, -1 * max_joint_speed * max_time, max_joint_speed * max_time)
+            angles = curr_joint_angles + angle_diff
+
+            # if np.any(old_angles - angles):
+            #     print('clipped joint angles')
+            #     print(old_angles, '\n', angles)
+
+        # control the speed by computing an appropriate action duration
+        # print('\n REQUESTING ACTION')
+        #print('old joints', self._get_joint_angles())
+        #print('new joints', angles)
+        pos_dist = np.linalg.norm(curr_pose[:3] - desired_pose[:3])
+        pos_duration = (pos_dist / self.max_speed) * 1
+        # compute a rough distance between quaternions
+        quat_dist = 1 - np.abs(np.inner(curr_pose[3:], desired_pose[3:]))
+        # the max position distance is about .07 (due to action scaling), so we scale by 0.07 to make them about the same
+        quat_duration = (quat_dist / self.max_speed) * .07
+        # this may not work because the quat distance can be zero while the joint angle distance is large
+        # compute the distance between the current wrist joint angle and the one output by the IK
+        # wrist ranges through 3pi, -4.7 to 4.7 so the max this can be is 9.4
+        # if we want the outer point of the wrist cuff to travel at no more than max_speed, and the wrist radius is about 5cm, then the max duration for a full 3pi should be about 9.4 seconds, + 20% for safety is 11.28 seconds
+        # this calculation comes out to a multiplier of .06 but .12 looks safer in practice, probably because this doesn't take into account that all the joints moving together can make the ee move much faster
+        angles_dist = np.abs(angles - self._get_joint_angles())
+        angles_dist = max(angles_dist)
+        angles_duration = (angles_dist / self.max_speed) * .2
+        print('durations', pos_duration, quat_duration, angles_duration)
+        duration = max(pos_duration, quat_duration, angles_duration)
+        if duration > 7:
+            print('wanted to do crazy trajectory')
+            raise(Exception)
         rospy.wait_for_service('angle_action')
         try:
             execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-            execute_action(angles, duration)
+            execute_action(angles=angles, duration=duration, action_duration=1.0/20)
             return None
         except rospy.ServiceException as e:
             pass
+
+    def request_angle_action(self, angles, pos, reset=False):
+        if False: # self.constant_hz and not reset:
+            self.request_angle_action_constant_rate(angles, pos)
+        if reset:
+            dist = np.linalg.norm(self._get_endeffector_pose() - pos[:3])
+            duration = dist/self.max_speed
+            rospy.wait_for_service('angle_action')
+            try:
+                execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
+                execute_action(angles, duration, -1)
+                return None
+            except rospy.ServiceException as e:
+                pass
+        else:
+            dist = np.linalg.norm(self._get_endeffector_pose() - pos[:3])
+            duration = dist/self.max_speed
+            rospy.wait_for_service('angle_action')
+            try:
+                execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
+                execute_action(angles, duration, 1.0/20)
+                return None
+            except rospy.ServiceException as e:
+                pass
 
     def request_ik_angles(self, ee_pos, seed_angles):
         rospy.wait_for_service('ik')

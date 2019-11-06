@@ -115,7 +115,7 @@ class SawyerReachXYZEnv(SawyerEnvBase):
         return 3
 
     def convert_obs_to_goals(self, obs):
-        return obs[:, -3:]
+        return obs[:, -7:-4]
 
     def set_to_goal(self, goal):
         for _ in range(3):

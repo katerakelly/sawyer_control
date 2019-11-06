@@ -29,11 +29,12 @@ class ImpedanceController():
         self._cmd_publisher = rospy.Publisher('/robot/limb/right/joint_command', JointCommand, queue_size=100)
         self.control_rate = rospy.Rate(control_rate)
 
-    def move_with_impedance(self, waypoints, duration=1.5):
+    def move_with_impedance(self, waypoints, duration=1.5, action_duration=-1):
         """
         Moves from curent position to final position while hitting waypoints
         :param waypoints: List of arrays containing waypoint joint angles
         :param duration: trajectory duration
+        :param action_duration: how long the spline is actually executed for
         """
         jointnames = self.limb.joint_names()
         prev_joint = np.array([self.limb.joint_angle(j) for j in jointnames])
@@ -42,7 +43,11 @@ class ImpedanceController():
         spline = CSpline(waypoints, duration)
 
         start_time = rospy.get_time()  # in seconds
+
+        # TODO: PUT THIS BACK
         finish_time = start_time + duration  # in seconds
+        if action_duration > 0:
+            finish_time = start_time + action_duration
 
         time = rospy.get_time()
         while time < finish_time:
@@ -58,7 +63,7 @@ class ImpedanceController():
             self.control_rate.sleep()
             time = rospy.get_time()
 
-        for i in range(10):
+        for i in range(1):
             command = JointCommand()
             command.mode = JointCommand.POSITION_MODE
             command.names = jointnames
@@ -66,4 +71,3 @@ class ImpedanceController():
             self._cmd_publisher.publish(command)
 
             self.control_rate.sleep()
-
