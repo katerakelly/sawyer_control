@@ -214,7 +214,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def step(self, action):
         self._act(action)
         observation = self._get_obs()
-        reward = self.compute_reward(action, self.convert_ob_to_goal(observation), self._state_goal)
+        reward = self.compute_rewards(action, self.convert_ob_to_goal(observation), self._state_goal)
         info = self._get_info()
         done = False
         ee_pos = observation[-7:-4]
@@ -230,10 +230,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             endpoint_velocity,
         ))
         return obs
-
-    @abc.abstractmethod
-    def compute_rewards(self, actions, obs, goals):
-        pass
 
     def _get_info(self):
         return dict()
@@ -398,10 +394,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             elif curr_z < safety_box.low[2]:
                 z = np.abs(curr_z - safety_box.low[2])
         return np.linalg.norm([x, y, z])
-
-    @abc.abstractmethod
-    def get_diagnostics(self, paths, prefix=''):
-        pass
 
     def _set_action_space(self):
         if self.action_mode == 'position':
@@ -605,10 +597,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
                 size=(batch_size, self.goal_space.low.size),
             )
         return goals
-
-    @abc.abstractmethod
-    def set_to_goal(self, goal):
-        pass
 
     """
     Image Env Functions
