@@ -1,4 +1,5 @@
 import numpy as np
+import sys
 import rospy
 import gym
 
@@ -8,8 +9,6 @@ from sawyer_control.core.serializable import Serializable
 from sawyer_control.core.multitask_env import MultitaskEnv
 from sawyer_control.configs.config import config_dict as config
 
-import sys
-sys.path.remove('/home/justin/ros_ws/src/sawyer_control/src')
 
 from sawyer_control.srv import observation
 from sawyer_control.srv import getRobotPoseAndJacobian
@@ -217,7 +216,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         ee_pos = observation[-7:-4]
         # print("R:" + str(reward) + " | O: " + str(ee_pos) + " | G: " + str(self._state_goal))
         return observation, reward, done, info
-    
+
     def _get_obs(self):
         angles, velocities, endpoint_pose = self.request_observation()
         obs = np.hstack((
@@ -230,7 +229,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def compute_rewards(self, actions, obs, goals):
         pass
-    
+
     def _get_info(self):
         return dict()
 
@@ -249,7 +248,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         VELOCITY_THRESHOLD = .002 * np.ones(7)
         no_velocity = (velocities < VELOCITY_THRESHOLD).all()
         return close_to_desired_reset_pos and no_velocity
-    
+
     def _check_reset_angles_within_threshold(self):
         desired_neutral = self.AnglePDController._des_angles
         desired_neutral = np.array([desired_neutral[joint] for joint in self.config.JOINT_NAMES])
@@ -431,9 +430,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             highs,
             dtype=np.float32,
         )
-            
-    """ 
-    ROS Functions 
+
+    """
+    ROS Functions
     """
 
     def init_rospy(self, update_hz):
