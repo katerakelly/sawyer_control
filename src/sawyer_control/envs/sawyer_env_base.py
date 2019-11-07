@@ -69,8 +69,8 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         return
 
     def _position_act(self, action):
-        ee_pos = self._get_endeffector_pose()
-        endeffector_pos = ee_pos[:3]
+        print("ACTION: " + str(action))
+        endeffector_pos = self._get_endeffector_position()
         target_ee_pos = (endeffector_pos + action)
         target_ee_pos = np.clip(target_ee_pos, self.config.POSITION_SAFETY_BOX_LOWS, self.config.POSITION_SAFETY_BOX_HIGHS)
         target_ee_pos = np.concatenate((target_ee_pos, [self.config.POSITION_CONTROL_EE_ORIENTATION.x, self.config.POSITION_CONTROL_EE_ORIENTATION.y, self.config.POSITION_CONTROL_EE_ORIENTATION.z, self.config.POSITION_CONTROL_EE_ORIENTATION.w]))
@@ -114,10 +114,22 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         return velocities
 
     def _get_endeffector_pose(self):
+        # full 7-dof pose of ee
+        _, _, endpoint_pose, _ = self.request_observation()
+        return endpoint_pose
+
+    def _get_endeffector_position(self):
+        # 3-D position of ee
         _, _, endpoint_pose, _ = self.request_observation()
         return endpoint_pose[:3]
 
-    def _get_endeffector_vel(self):
+    def _get_endeffector_fullvel(self):
+        # full 7-dof position + rotational velocities
+        _, _, _, endpoint_vel = self.request_observation()
+        return endpoint_vel
+
+    def _get_endeffector_posvel(self):
+        # x-y-z velocities of ee
         _, _, _, endpoint_vel = self.request_observation()
         return endpoint_vel[:3]
 
@@ -135,6 +147,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         return observation, reward, done, info
 
     def _get_obs(self):
+        ''' concatenate all parts of the obs into one vector '''
         angles, velocities, endpoint_pose, endpoint_velocity = self.request_observation()
         obs = np.hstack((
             self._wrap_angles(angles),
@@ -161,7 +174,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
 
     def _check_reset_complete(self):
         close_to_desired_reset_pos = self._check_reset_angles_within_threshold()
-        _, velocities, _, _ = self.request_observation()
+        velocities = self._get_joint_velocities()
         velocities = np.abs(np.array(velocities))
         VELOCITY_THRESHOLD = .002 * np.ones(7)
         no_velocity = (velocities < VELOCITY_THRESHOLD).all()
@@ -179,7 +192,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         if not self.reset_free:
             if self.action_mode == "position":
                 for _ in range(5):
-                    self._position_act(self.pos_control_reset_position - self._get_endeffector_pose())
+                    self._position_act(self.pos_control_reset_position - self._get_endeffector_position())
             else:
                 self.in_reset = True
                 self._safe_move_to_neutral()
@@ -312,23 +325,27 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             )
 
     def _set_observation_space(self):
-        lows = np.hstack((
-            self.config.JOINT_VALUE_LOW['position'],
-            self.config.JOINT_VALUE_LOW['velocity'],
-            self.config.END_EFFECTOR_VALUE_LOW['position'],
-            self.config.END_EFFECTOR_VALUE_LOW['angle'],
-        ))
-        highs = np.hstack((
-            self.config.JOINT_VALUE_HIGH['position'],
-            self.config.JOINT_VALUE_HIGH['velocity'],
-            self.config.END_EFFECTOR_VALUE_HIGH['position'],
-            self.config.END_EFFECTOR_VALUE_HIGH['angle'],
-        ))
-        self.observation_space = Box(
-            lows,
-            highs,
-            dtype=np.float32,
-        )
+        if self.action_mode == 'torque':
+            lows = np.hstack((
+                self.config.JOINT_VALUE_LOW['position'],
+                self.config.JOINT_VALUE_LOW['velocity'],
+                self.config.END_EFFECTOR_VALUE_LOW['position'],
+                self.config.END_EFFECTOR_VALUE_LOW['angle'],
+            ))
+            highs = np.hstack((
+                self.config.JOINT_VALUE_HIGH['position'],
+                self.config.JOINT_VALUE_HIGH['velocity'],
+                self.config.END_EFFECTOR_VALUE_HIGH['position'],
+                self.config.END_EFFECTOR_VALUE_HIGH['angle'],
+            ))
+            self.observation_space = Box(
+                lows,
+                highs,
+                dtype=np.float32,
+            )
+        else:
+            print('Not setting observation space')
+            pass
 
     """
     ROS Functions
@@ -387,7 +404,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             print(e)
 
     def request_angle_action(self, angles, pos):
-        dist = np.linalg.norm(self._get_endeffector_pose() - pos[:3])
+        dist = np.linalg.norm(self._get_endeffector_position() - pos[:3])
         duration = dist/self.max_speed
         rospy.wait_for_service('angle_action')
         try:
