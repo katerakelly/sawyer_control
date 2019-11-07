@@ -33,7 +33,19 @@ def get_observation(unused):
         orientation.w
     ]
 
-    return observationResponse(angles, velocities, torques, endpoint_pose)
+    ee_vel_dict = arm.endpoint_velocity()
+    linear = ee_vel_dict['linear']
+    angular = ee_vel_dict['angular']
+    endpoint_velocity = [
+        linear.x,
+        linear.y,
+        linear.z,
+        angular.x,
+        angular.y,
+        angular.z
+    ]
+
+    return observationResponse(angles, velocities, torques, endpoint_pose, endpoint_velocity)
 
 def observation_server():
 
