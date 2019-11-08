@@ -27,8 +27,8 @@ class CSpline:
 
         return self._cs(t), self._cs(t, nu=1), self._cs(t, nu=2)
 
-class PositionController():
-    def __init__(self, control_rate):
+class VelocityController():
+    def __init__(self, control_rate, update_rate=20):
         self._rs = intera_interface.RobotEnable(CHECK_VERSION)
         print("Robot enabled...")
         self.limb = intera_interface.Limb("right")
@@ -39,8 +39,8 @@ class PositionController():
         # self.action_subscriber = rospy.Subscriber('/robot/limb/right/joint_command', JointCommand, queue_size=100)
         self.control_rate = rospy.Rate(control_rate)
 
-        # get a new action 20 times per second
-        self.action_update_rate = rospy.Rate(20)
+        # get a new action this many times per second (this is the frequency of the policy)
+        self.action_update_rate = rospy.Rate(update_rate)
         self.move_calls_between_update = 0
 
         self.jointnames = self.limb.joint_names()
@@ -54,7 +54,7 @@ class PositionController():
         # will call self.move() control_rate times per second
         self.move_timer = rospy.Timer(rospy.Duration(1.0 / control_rate), self.move)
 
-    def update_plan(self, waypoints, duration=1.5):
+    def update_plan(self, waypoints, duration=1.5, constant_hz=True):
         """
         Updates the current plan with waypoints
         :param waypoints: List of arrays containing waypoint joint angles
@@ -72,16 +72,22 @@ class PositionController():
         # plot a course to the goal position given a desired duration (usually computed from safety bounds)
         self.spline = CSpline(self.waypoints, duration)
 
-        self.start_time = rospy.get_time()  # in seconds
-        # finish_time = start_time + duration  # in seconds
 
-        # while time < finish_time:
-        # wait for 1/10 seconds
-        print("UPDATED PLAN")
-        self.action_update_rate.sleep()
+        self.start_time = rospy.get_time()
+        # policy controls the system at a fixed frequency
+        if constant_hz:
+            # waits for just 1/control_rate seconds
+            self.action_update_rate.sleep()
+
+        # during reset, take the whole alloted time to complete the move
+        else:
+            finish_time = self.start_time + duration
+            while rospy.get_time() < finish_time:
+                print("UPDATED PLAN")
+                self.action_update_rate.sleep()
 
     def move(self, timer_event):
-        """Move according to the current plan"""
+        """ Move according to the current plan, will be called by ROS 1/control_rate times per second """
 
         self.move_calls_between_update += 1
 
@@ -113,12 +119,13 @@ class PositionController():
 
 def execute_action(action_msg):
     action = action_msg.angles
+    constant_hz = action_msg.constant_hz
+    duration = action_msg.duration
     joint_names = arm.joint_names()
     joint_to_values = dict(zip(joint_names, action))
-    duration = action_msg.duration
     if joint_to_values:
         ja = [joint_to_values[name] for name in arm.joint_names()]
-        controller.update_plan([ja], duration=duration)
+        controller.update_plan([ja], duration=duration, constant_hz=constant_hz)
         return angle_actionResponse(True)
     return angle_actionResponse(False)
 
@@ -128,7 +135,7 @@ def angle_action_server():
     global controller
     arm = ii.Limb('right')
     arm.set_joint_position_speed(0.1)
-    controller = PositionController(control_rate=1000)
+    controller = VelocityController(control_rate=100, update_rate=20)
     s = rospy.Service('angle_action', angle_action, execute_action)
     rospy.spin()
 

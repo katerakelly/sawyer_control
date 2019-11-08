@@ -30,7 +30,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             position_action_scale=0.1,
             config_name = 'base_config',
             fix_goal=False,
-            max_speed = 0.05,
+            max_speed = 0.07,
             reset_free=False,
             img_start_col=350, #can range from  0-999
             img_start_row=200, #can range from  0-999
@@ -501,7 +501,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             print(e)
 
 
-    def request_angle_action_constant_rate(self, angles, desired_pose, clip_joints=True):
+    def request_angle_action_constant_rate(self, angles, desired_pose, clip_joints=True, reset=False):
         curr_pose = self._get_endeffector_pose()
 
         if clip_joints:
@@ -536,7 +536,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         angles_dist = np.abs(angles - self._get_joint_angles())
         angles_dist = max(angles_dist)
         angles_duration = (angles_dist / self.max_speed) * .2
-        print('durations', pos_duration, quat_duration, angles_duration)
         duration = max(pos_duration, quat_duration, angles_duration)
         if duration > 7:
             print('wanted to do crazy trajectory')
@@ -544,13 +543,15 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         rospy.wait_for_service('angle_action')
         try:
             execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-            execute_action(angles=angles, duration=duration, action_duration=1.0/20)
+            # NOTE: action_duration is not used, but set in controller instantiation
+            execute_action(angles=angles, duration=duration, action_duration=.05, constant_hz=(not reset))
             return None
         except rospy.ServiceException as e:
             pass
 
     def request_angle_action(self, angles, pos, reset=False):
-        if False: # self.constant_hz and not reset:
+        # NOTE: not used for velocity controller
+        if self.constant_hz and not reset:
             self.request_angle_action_constant_rate(angles, pos)
         if reset:
             dist = np.linalg.norm(self._get_endeffector_position() - pos[:3])
@@ -558,7 +559,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             rospy.wait_for_service('angle_action')
             try:
                 execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-                execute_action(angles, duration, -1)
+                execute_action(angles, duration, -1, False)
                 return None
             except rospy.ServiceException as e:
                 pass
@@ -568,7 +569,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             rospy.wait_for_service('angle_action')
             try:
                 execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-                execute_action(angles, duration, 1.0/20)
+                execute_action(angles, duration, 1.0/20, False)
                 return None
             except rospy.ServiceException as e:
                 pass
