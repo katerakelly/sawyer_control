@@ -30,7 +30,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             position_action_scale=0.1,
             config_name = 'base_config',
             fix_goal=False,
-            max_speed = 0.07,
+            max_speed = 0.05, #.07
             reset_free=False,
             img_start_col=350, #can range from  0-999
             img_start_row=200, #can range from  0-999
@@ -539,18 +539,17 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         duration = max(pos_duration, quat_duration, angles_duration)
         if duration > 7:
             print('wanted to do crazy trajectory')
-            raise(Exception)
+            #raise(Exception)
         rospy.wait_for_service('angle_action')
         try:
             execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-            # NOTE: action_duration is not used, but set in controller instantiation
-            execute_action(angles=angles, duration=duration, action_duration=.05, constant_hz=(not reset))
+            execute_action(angles=angles, duration=duration, constant_hz=(not reset))
             return None
         except rospy.ServiceException as e:
             pass
 
     def request_angle_action(self, angles, pos, reset=False):
-        # NOTE: not used for velocity controller
+        # NOTE: not used for velocity controller, may no longer work!
         if self.constant_hz and not reset:
             self.request_angle_action_constant_rate(angles, pos)
         if reset:
