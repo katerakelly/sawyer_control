@@ -19,7 +19,7 @@ import copy
 class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def __init__(
             self,
-            action_mode='torque',
+            action_mode='position',
             use_safety_box=True,
             torque_action_scale=1,
             position_action_scale=1/10,
@@ -124,7 +124,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         info = self._get_info()
         done = False
         return observation, reward, done, info
-    
+
     def _get_obs(self):
         angles, velocities, endpoint_pose = self.request_observation()
         obs = np.hstack((
@@ -137,7 +137,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def compute_rewards(self, actions, obs, goals):
         pass
-    
+
     def _get_info(self):
         return dict()
 
@@ -156,7 +156,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         VELOCITY_THRESHOLD = .002 * np.ones(7)
         no_velocity = (velocities < VELOCITY_THRESHOLD).all()
         return close_to_desired_reset_pos and no_velocity
-    
+
     def _check_reset_angles_within_threshold(self):
         desired_neutral = self.AnglePDController._des_angles
         desired_neutral = np.array([desired_neutral[joint] for joint in self.config.JOINT_NAMES])
@@ -319,9 +319,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             highs,
             dtype=np.float32,
         )
-            
-    """ 
-    ROS Functions 
+
+    """
+    ROS Functions
     """
 
     def init_rospy(self, update_hz):

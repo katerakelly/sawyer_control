@@ -20,5 +20,5 @@ RESET_ANGLES = np.array(
 
 RESET_DICT = dict(zip(JOINT_NAMES, RESET_ANGLES))
 POSITION_CONTROL_EE_ORIENTATION=Quaternion(
-    x=0.72693193, y=-0.03049006, z=0.6855942, w=-0.02451418
+    x=1.0, y=-.5, z=0.0, w=0.0
 )
