@@ -22,10 +22,10 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             action_mode='position',
             use_safety_box=True,
             torque_action_scale=1,
-            position_action_scale=1/10,
+            position_action_scale=.1,
             config_name = 'base_config',
             fix_goal=False,
-            max_speed = 0.05,
+            max_speed = 0.10,
             reset_free=False,
             img_start_col=350, #can range from  0-999
             img_start_row=200, #can range from  0-999
@@ -42,8 +42,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         self.use_safety_box = use_safety_box
         self.AnglePDController = AnglePDController(config=self.config)
 
-        self._set_action_space()
-        self._set_observation_space()
         self.get_latest_pose_jacobian_dict()
 
         self.torque_action_scale = torque_action_scale
@@ -68,14 +66,13 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             self._torque_act(action*self.torque_action_scale)
         return
 
-    def _position_act(self, action):
-        print("ACTION: " + str(action))
+    def _position_act(self, action, reset=False):
         endeffector_pos = self._get_endeffector_position()
         target_ee_pos = (endeffector_pos + action)
         target_ee_pos = np.clip(target_ee_pos, self.config.POSITION_SAFETY_BOX_LOWS, self.config.POSITION_SAFETY_BOX_HIGHS)
         target_ee_pos = np.concatenate((target_ee_pos, [self.config.POSITION_CONTROL_EE_ORIENTATION.x, self.config.POSITION_CONTROL_EE_ORIENTATION.y, self.config.POSITION_CONTROL_EE_ORIENTATION.z, self.config.POSITION_CONTROL_EE_ORIENTATION.w]))
         angles = self.request_ik_angles(target_ee_pos, self._get_joint_angles())
-        self.send_angle_action(angles, target_ee_pos)
+        self.request_angle_action(angles, target_ee_pos, reset)
 
     def _torque_act(self, action):
         curr_joint_angles, curr_velocities, ee_pose, ee_vel = self.request_observation()
@@ -191,8 +188,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def _reset_robot(self):
         if not self.reset_free:
             if self.action_mode == "position":
-                for _ in range(5):
-                    self._position_act(self.pos_control_reset_position - self._get_endeffector_position())
+                self._position_act(self.pos_control_reset_position - self._get_endeffector_position(), reset=True)
             else:
                 self.in_reset = True
                 self._safe_move_to_neutral()
@@ -306,7 +302,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
                 z = np.abs(curr_z - safety_box.low[2])
         return np.linalg.norm([x, y, z])
 
-    @abc.abstractmethod
     def get_diagnostics(self, paths, prefix=''):
         pass
 
@@ -359,9 +354,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def send_action(self, action):
         self.action_publisher.publish(action)
 
-    def send_angle_action(self, action, target):
-        self.request_angle_action(action, target)
-
     def request_image(self):
         rospy.wait_for_service('images')
         try:
@@ -403,13 +395,33 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         except rospy.ServiceException as e:
             print(e)
 
-    def request_angle_action(self, angles, pos):
-        dist = np.linalg.norm(self._get_endeffector_position() - pos[:3])
-        duration = dist/self.max_speed
+    def request_angle_action(self, angles, desired_pose, reset=False):
+        curr_pose = self._get_endeffector_pose()
+        # control the speed by computing an appropriate action duration
+        pos_dist = np.linalg.norm(curr_pose[:3] - desired_pose[:3])
+        pos_duration = (pos_dist / self.max_speed) * 1
+        # compute a rough distance between quaternions
+        quat_dist = 1 - np.abs(np.inner(curr_pose[3:], desired_pose[3:]))
+        # the max position distance is about .07 (due to action scaling), so we scale by 0.07 to make them about the same
+        quat_duration = (quat_dist / self.max_speed) * .07
+        # this may not work because the quat distance can be zero while the joint angle distance is large
+        # compute the distance between the current wrist joint angle and the one output by the IK
+        # wrist ranges through 3pi, -4.7 to 4.7 so the max this can be is 9.4
+        # if we want the outer point of the wrist cuff to travel at no more than max_speed, and the wrist radius is about 5cm, then the max duration for a full 3pi should be about 9.4 seconds, + 20% for safety is 11.28 seconds
+        # this calculation comes out to a multiplier of .06 but .12 looks safer in practice, probably because this doesn't take into account that all the joints moving together can make the ee move much faster
+        angles_dist = np.abs(angles - self._get_joint_angles())
+        angles_dist = max(angles_dist)
+        angles_duration = (angles_dist / self.max_speed) * .2
+        # NOTE: usually, pos_duration is the longest, unless the IK does something crazy
+        duration = max(pos_duration, quat_duration, angles_duration)
+        if duration > 7:
+            print('wanted to do crazy trajectory')
+            print('durations (pos, quat, joint):', pos_duration, quat_duration, angles_duration)
+            raise(Exception)
         rospy.wait_for_service('angle_action')
         try:
             execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
-            execute_action(angles, duration)
+            execute_action(angles, duration, reset)
             return None
         except rospy.ServiceException as e:
             pass
@@ -455,7 +467,6 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             )
         return goals
 
-    @abc.abstractmethod
     def set_to_goal(self, goal):
         pass
 
@@ -469,7 +480,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def set_env_state(self, env_state):
         angles, ee_pos = env_state
         for _ in range(3):
-            self.send_angle_action(angles, ee_pos)
+            self.request_angle_action(angles, ee_pos)
 
     def initialize_camera(self, init_fctn):
         pass
