@@ -19,7 +19,7 @@ import copy
 class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def __init__(
             self,
-            action_mode='position',
+            action_mode='joint_position',
             use_safety_box=True,
             torque_action_scale=1,
             position_action_scale=.1,
@@ -59,12 +59,17 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         self.img_row_delta = img_row_delta
 
 
-    def _act(self, action):
+    def _act(self, action, duration=0.1, reset=False):
         if self.action_mode == 'position':
             self._position_act(action * self.position_action_scale)
+        if self.action_mode == 'joint_position':
+            self._joint_position_act(action, duration, reset=reset)
         else:
             self._torque_act(action*self.torque_action_scale)
         return
+
+    def _joint_position_act(self, joint_positions, duration, reset=False):
+        self.request_joint_position_action(joint_positions, duration, reset=reset)
 
     def _position_act(self, action, reset=False):
         endeffector_pos = self._get_endeffector_position()
@@ -394,6 +399,15 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
             )
         except rospy.ServiceException as e:
             print(e)
+
+    def request_joint_position_action(self, desired_joint_positions, duration, reset=False):
+        rospy.wait_for_service('angle_action')
+        try:
+            execute_action = rospy.ServiceProxy('angle_action', angle_action, persistent=True)
+            execute_action(desired_joint_positions, duration, reset, 1/self.timestep)
+            return None
+        except rospy.ServiceException as e:
+            pass
 
     def request_angle_action(self, angles, desired_pose, reset=False):
         curr_pose = self._get_endeffector_pose()

@@ -14,6 +14,7 @@ from sawyer_control.srv import observation
 
 # constants for robot control
 max_vel_mag = np.array([0.88, 0.678, 0.996, 0.996, 1.776, 1.776, 2.316])
+max_vel_mag/=2
 max_accel_mag = np.array([3.5, 2.5, 5, 5, 5, 5, 5])
 
 class CSpline:
@@ -50,6 +51,7 @@ class VelocityController():
 
         # get a new action this many times per second (this is the frequency of the policy)
         self.action_update_rate = rospy.Rate(update_rate)
+        self.rate_is_correct = False
         self.move_calls_between_update = 0
 
         self.jointnames = self.limb.joint_names()
@@ -63,33 +65,50 @@ class VelocityController():
         # will call self.move() control_rate times per second
         self.move_timer = rospy.Timer(rospy.Duration(1.0 / control_rate), self.move)
 
-    def update_plan(self, waypoints, duration=1.5, reset=False):
+    def update_plan(self, waypoints, duration=1.5, reset=False, action_update_rate=None):
         """
         Updates the current plan with waypoints
         :param waypoints: List of arrays containing waypoint joint angles
         :param duration: trajectory duration
         """
 
+        ####################
+        #### update rate
+        ####################
+        if not self.rate_is_correct and action_update_rate is not None:
+            self.action_update_rate = rospy.Rate(action_update_rate)
+            self.rate_is_correct = True
+
         if not waypoints:
             return
 
+        ####################
+        #### make plan
+        ####################
+
         self.move_calls_between_update = 0
 
+        # make a spline between prev_joint and waypoints
         self.prev_joint = np.array([self.limb.joint_angle(j) for j in self.jointnames])
         self.waypoints = np.array([self.prev_joint] + waypoints)
-
-        # plot a course to the goal position given a desired duration (usually computed from safety bounds)
         self.spline = CSpline(self.waypoints, duration)
 
+        ########################################
+        #### execute that command for fixed amount of time
+        #### or if doing reset, do it as long as needed
+        ########################################
 
         self.start_time = rospy.get_time()
         # policy controls the system at a fixed frequency
         if not reset:
             # waits for just 1/control_rate seconds
             self.action_update_rate.sleep()
+            if action_update_rate is not None:
+                print("Running commands at fixed rate: ", action_update_rate, " Hz, ", 1/action_update_rate, " sec")
 
         # during reset, take the whole alloted time to complete the move
         else:
+            print("Running a command for ", duration, " seconds.")
             finish_time = self.start_time + duration
             while rospy.get_time() < finish_time:
                 self.action_update_rate.sleep()

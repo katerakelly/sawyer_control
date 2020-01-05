@@ -34,7 +34,7 @@ class SawyerReachXYZEnv(SawyerEnvBase):
 
     def _get_obs(self):
         if self.action_mode=='position':
-            return self._get_endeffector_pose()
+            return self._get_endeffector_position()
         else:
             return super()._get_obs()
 
@@ -49,7 +49,7 @@ class SawyerReachXYZEnv(SawyerEnvBase):
         return r
 
     def _get_info(self):
-        hand_distance = np.linalg.norm(self._state_goal - self._get_endeffector_pose())
+        hand_distance = np.linalg.norm(self._state_goal - self._get_endeffector_position())
         return dict(
             hand_distance=hand_distance,
             hand_success=(hand_distance<self.indicator_threshold).astype(float)
@@ -115,5 +115,5 @@ class SawyerReachXYZEnv(SawyerEnvBase):
 
     def set_to_goal(self, goal):
         for _ in range(3):
-            self._position_act(goal - self._get_endeffector_pose()[:3])
-        return self._get_endeffector_pose()[:3]
+            self._position_act(goal - self._get_endeffector_position()[:3])
+        return self._get_endeffector_position()[:3]
