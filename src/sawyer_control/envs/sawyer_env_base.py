@@ -2,16 +2,24 @@ import numpy as np
 import rospy
 import gym
 from gym.spaces import Box
-from sawyer_control.pd_controllers.joint_angle_pd_controller import AnglePDController
-from sawyer_control.core.serializable import Serializable
-from sawyer_control.core.multitask_env import MultitaskEnv
-from sawyer_control.configs.config import config_dict as config
+
+# from sawyer_control.pd_controllers.joint_angle_pd_controller import AnglePDController
+# from sawyer_control.core.serializable import Serializable
+# from sawyer_control.core.multitask_env import MultitaskEnv
+# from sawyer_control.configs.config import config_dict as config
+
+from sawyer_control.src.sawyer_control.pd_controllers.joint_angle_pd_controller import AnglePDController
+from sawyer_control.src.sawyer_control.core.serializable import Serializable
+from sawyer_control.src.sawyer_control.core.multitask_env import MultitaskEnv
+from sawyer_control.src.sawyer_control.configs.config import config_dict as config
+
 from sawyer_control.srv import observation
 from sawyer_control.srv import getRobotPoseAndJacobian
 from sawyer_control.srv import ik
 from sawyer_control.srv import angle_action
 from sawyer_control.srv import image
 from sawyer_control.msg import actions
+
 import abc
 import cv2
 import copy

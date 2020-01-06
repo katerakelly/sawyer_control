@@ -6,15 +6,19 @@ import gym
 import os
 
 from pyquaternion import Quaternion
-from sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
-from sawyer_control.envs.sawyer_env_base import SawyerEnvBase
-from sawyer_control.core.serializable import Serializable
+
+# from sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
+# from sawyer_control.envs.sawyer_env_base import SawyerEnvBase
+# from sawyer_control.core.serializable import Serializable
+from sawyer_control.src.sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
+from sawyer_control.src.sawyer_control.envs.sawyer_env_base import SawyerEnvBase
+from sawyer_control.src.sawyer_control.core.serializable import Serializable
 
 
-class MslacPegInsertionEnv(SawyerEnvBase):
+class MslacReacherEnv(SawyerEnvBase):
 
     '''
-    Inserting a peg into a box (which is at a fixed location)
+    Reach to a fixed ee goal position
     '''
 
     def __init__(self, *args, **kwargs):
@@ -52,13 +56,10 @@ class MslacPegInsertionEnv(SawyerEnvBase):
 
         # reset position (note: this is the "0" of our new (-1,1) action range)
         self.reset_joint_positions = self.limits_lows_joint_pos + self.joint_range/2.0
-        self.reset_duration = 6.0 # seconds to allow for reset
+        self.reset_duration = 4.0 # seconds to allow for reset
 
-        # goal pose is when the peg is correctly inserted
-        # TODO just made this goal up
-        self.goal_ee_position = np.array([0.45, 0.1, 0.23])
-        self.goal_ee_orientation = np.array([1, 0, 0, 0])
-        self.goal_ee = np.concatenate((self.goal_ee_position, self.goal_ee_orientation))
+        # goal ee pose
+        self.goal_ee_position = np.array([0.5, -0.23, 0.47])
 
         # reset robot to initialize
         self.reset()
@@ -95,8 +96,10 @@ class MslacPegInsertionEnv(SawyerEnvBase):
     ####################################
 
     def compute_rewards(self, obs, action=None):
-        # TODO
-        return 0 ##-np.linalg.norm(obs[:3] - self.goal_pose[:3])
+        curr_ee_position = obs[self.num_joint_dof:self.num_joint_dof+3]
+        difference = curr_ee_position - self.goal_ee_position
+        reward = -np.linalg.norm(difference)
+        return reward
 
     def step(self, action):
 
@@ -106,8 +109,6 @@ class MslacPegInsertionEnv(SawyerEnvBase):
 
         # enforce joint velocity limits on this scaled action
         feasible_scaled_action = self.make_feasible(action_scaled)
-
-        # TODO safety box?
 
         # take a step
         self._act(feasible_scaled_action, self.timestep)

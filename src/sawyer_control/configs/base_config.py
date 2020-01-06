@@ -1,6 +1,8 @@
 import numpy as np
 from gym.spaces import Box
-from sawyer_control.configs.ros_config import *
+
+from sawyer_control.src.sawyer_control.configs.ros_config import *
+
 
 #SPACES
 JOINT_ANGLES_HIGH = np.array([

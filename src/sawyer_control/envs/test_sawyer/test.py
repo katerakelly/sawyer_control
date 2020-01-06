@@ -2,7 +2,8 @@ import sys
 import numpy as np
 import time
 
-from sawyer_control.envs.mslac_peg import SawyerPegInsertionEnv
+from sawyer_control.src.sawyer_control.envs.mslac_reacher import MslacReacherEnv
+from sawyer_control.src.sawyer_control.envs.mslac_peg import MslacPegInsertionEnv
 
 ##################################################################################
 ##################################################################################
@@ -22,6 +23,30 @@ Instrucs for running:
 	cd src/sawyer_control/src/sawyer_control/envs/test_sawyer
 		<this should load a new pythonpath that allows cv etc to be found>
 	python test.py
+
+
+Possible robot errors:
+
+-If ready=False, robot is in homing mode. 
+You need to open the e-stop and press the grey button on the robot's ee,
+and move the arm a little bit (manually). 
+Also consider restarting if things aren't working...
+
+-If you already release the estop but it says estop_button: 3,
+you just need to do `reset`. Then, after enable, 
+you should see estep_button:0 and ready=True.
+
+
+Relevant code files:
+	envs
+		mslac_reacher.py
+		mslac_peg.py
+		sawyer_env_base.py
+	ros nodes
+		scripts/angle_action_server.py
+		pd_controllers/velocity_controller.py
+		exp_nodes.launch
+
 """
 
 ##################################################################################
@@ -32,7 +57,7 @@ Instrucs for running:
 ##########################################
 # create env (does a reset inside there)
 ##########################################
-env = SawyerPegInsertionEnv()
+env = MslacPegInsertionEnv()
 
 
 ##########################################
@@ -63,7 +88,7 @@ env = SawyerPegInsertionEnv()
 
 # start_time = time.time()
 # num_steps = 100
-# change_freq = 10
+# change_freq = 5
 # for i in range(num_steps):
 # 	if i%change_freq==0:
 # 		ac = np.random.uniform(env.action_lows, env.action_highs)
@@ -153,4 +178,66 @@ c) I don't think it can hit the right of cage
 d) It cannot reach upward at all
 e) It cannot rotate backward
 
+
+
+
+############
+
+Example topic outputs:
+
+rostopic echo -n 1 /robot/state
+  ready: True
+  enabled: True
+  stopped: False
+  error: False
+  lowVoltage: False
+  estop_button: 0
+  estop_source: 0
+
+rostopic echo -n 1 /robot/joint_states
+  name: 
+  - head_pan
+  - right_j0
+  - right_j1
+  - right_j2
+  - right_j3
+  - right_j4
+  - right_j5
+  - right_j6
+  - torso_t0
+  position: [0.5597392578125, -0.5550078125, -1.070587890625, -0.1909248046875, 2.3332509765625, 0.3215478515625, 0.3741708984375, -1.0871748046875, 0.0]
+  velocity: [-0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, -0.001, 0.0]
+  effort: [0.052, -0.424, -15.2, -1.672, -5.584, 0.304, 0.168, 0.052, 0.0]
+
+
+rostopic echo -n 1 /robot/limb/right/endpoint_state
+	pose: 
+	  position: 
+	    x: 0.589071476483
+	    y: -0.233236801619
+	    z: 0.47302967698
+	  orientation: 
+	    x: 0.277159573158
+	    y: 0.833932483173
+	    z: -0.298555951573
+	    w: 0.372294947986
+	twist: 
+	  linear: 
+	    x: -0.000947022574253
+	    y: -0.00121524077737
+	    z: -0.000249181715562
+	  angular: 
+	    x: 0.00200475881992
+	    y: -0.00200965631648
+	    z: -0.000410425661771
+	wrench: 
+	  force: 
+	    x: -2.51468313214
+	    y: 3.44215142101
+	    z: 2.52177747361
+	  torque: 
+	    x: 0.534232319021
+	    y: 0.511620720856
+	    z: -0.142879202892
+	valid: True
 """
