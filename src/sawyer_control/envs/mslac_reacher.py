@@ -24,9 +24,7 @@ class MslacReacherEnv(SawyerEnvBase):
         SawyerEnvBase.__init__(self, **kwargs)
 
         # params
-        self.timestep = 0.1 # this env will be running at 1/x Hz
-        self.im_width = 32
-        self.im_height = 32
+        self.timestep = 0.25 # this env will be running at 1/x Hz
         self.num_joint_dof = 7
 
         # note: this env is currently written only for this mode
@@ -78,9 +76,10 @@ class MslacReacherEnv(SawyerEnvBase):
     ####################################
     ####################################
 
-    def _get_image(self):
-        # TODO haven't integrated this function with the mslac codebase yet
-        return self.get_image(self.im_width, self.im_height)
+    def _get_image(self, width, height):
+        # TODO this function
+        # return self.get_image(im_width, im_height)
+        return np.ones((width,height,3))
 
     def _get_obs(self):
         ''' [7] joint angles + [7] ee pose '''
@@ -115,7 +114,7 @@ class MslacReacherEnv(SawyerEnvBase):
         # reward/etc. after taking the step
         reward = self.compute_rewards(obs)
         done = False
-        info = self._get_info()
+        info = None #self._get_info()
         return obs, reward, done, info
 
     def make_feasible(self, desired_positions):
