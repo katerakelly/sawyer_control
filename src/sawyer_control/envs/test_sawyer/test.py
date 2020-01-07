@@ -2,8 +2,8 @@ import sys
 import numpy as np
 import time
 
-from sawyer_control.src.sawyer_control.envs.mslac_reacher import MslacReacherEnv
-from sawyer_control.src.sawyer_control.envs.mslac_peg import MslacPegInsertionEnv
+from sawyer_control.envs.mslac_reacher import MslacReacherEnv
+from sawyer_control.envs.mslac_peg import MslacPegInsertionEnv
 
 ##################################################################################
 ##################################################################################

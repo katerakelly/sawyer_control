@@ -7,13 +7,9 @@ import os
 
 from pyquaternion import Quaternion
 
-# from sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
-# from sawyer_control.envs.sawyer_env_base import SawyerEnvBase
-# from sawyer_control.core.serializable import Serializable
-from sawyer_control.src.sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
-from sawyer_control.src.sawyer_control.envs.sawyer_env_base import SawyerEnvBase
-from sawyer_control.src.sawyer_control.core.serializable import Serializable
-
+from sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
+from sawyer_control.envs.sawyer_env_base import SawyerEnvBase
+from sawyer_control.core.serializable import Serializable
 
 class MslacReacherEnv(SawyerEnvBase):
 

@@ -1,5 +1,5 @@
 
-from sawyer_control.src.sawyer_control.configs.base_config import *
+from sawyer_control.configs.base_config import *
 
 import numpy as np
 from gym.spaces import Box
