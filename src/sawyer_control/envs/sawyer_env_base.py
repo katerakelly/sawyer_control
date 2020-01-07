@@ -84,7 +84,7 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
     def _act(self, action, duration=0.1, reset=False):
         if self.action_mode == 'position':
             self._position_act(action * self.position_action_scale)
-        if self.action_mode == 'joint_position':
+        if self.action_mode == 'joint_position' or 'joint_delta_position':
             self._joint_position_act(action, duration, reset=reset)
         else:
             self._torque_act(action*self.torque_action_scale)

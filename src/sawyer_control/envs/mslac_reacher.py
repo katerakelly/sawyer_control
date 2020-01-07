@@ -29,12 +29,18 @@ class MslacReacherEnv(SawyerEnvBase):
 
         # note: this env is currently written only for this mode
         assert self.action_mode=='joint_position'
+        # TODO Tony create joint_delta_position
 
-        # limits
-        joint_vel_limit = 0.07 #deg/sec
-        self.limits_joint_vel = np.array([joint_vel_limit]*self.num_joint_dof)
+        # vel limits
+        joint_vel_lim = 0.07 #deg/sec
+        self.limits_lows_joint_vel = -np.array([joint_vel_lim]*self.num_joint_dof)
+        self.limits_highs_joint_vel = np.array([joint_vel_lim]*self.num_joint_dof)
+
+        # position limits
         self.limits_lows_joint_pos = np.array([0, -0.9, -0.8, 1.6, 0.6, -0.7, -1.5])
         self.limits_highs_joint_pos = np.array([0.3, -0.7, -0.1, 2.1, 2.7, 0.7, 1.5])
+
+        # ee limits
         self.limits_lows_ee_pos = -1*np.ones(3)
         self.limits_highs_ee_pos = np.ones(3)
         self.limits_lows_ee_angles = -1*np.ones(4)
@@ -46,10 +52,11 @@ class MslacReacherEnv(SawyerEnvBase):
 
         # ranges
         self.action_range = self.action_highs-self.action_lows
-        self.joint_range = (self.limits_highs_joint_pos - self.limits_lows_joint_pos)  
+        self.joint_pos_range = (self.limits_highs_joint_pos - self.limits_lows_joint_pos)
+        self.joint_vel_range = (self.limits_highs_joint_vel - self.limits_lows_joint_vel)
 
         # reset position (note: this is the "0" of our new (-1,1) action range)
-        self.reset_joint_positions = self.limits_lows_joint_pos + self.joint_range/2.0
+        self.reset_joint_positions = self.limits_lows_joint_pos + self.joint_pos_range/2.0
         self.reset_duration = 4.0 # seconds to allow for reset
 
         # goal ee pose
@@ -82,7 +89,7 @@ class MslacReacherEnv(SawyerEnvBase):
         return np.ones((width,height,3))
 
     def _get_obs(self):
-        ''' [7] joint angles + [7] ee pose '''
+        ''' [7] joint angles + [7] ee pose (3 position, 4 angle quaternion)'''
         angles = self._get_joint_angles()
         ee_pose = self._get_endeffector_pose()
         return np.concatenate([angles, ee_pose])
@@ -98,12 +105,29 @@ class MslacReacherEnv(SawyerEnvBase):
 
     def step(self, action):
 
-        # convert from given (-1,1) to joint positions (low,high)
-        action = np.clip(action, -1, 1)
-        action_scaled = (((action - self.action_lows) * self.joint_range) / self.action_range) + self.limits_lows_joint_pos
+        if self.action_mode=='joint_position':
+
+            # clip incoming action
+            desired_joint_positions = np.clip(action, -1, 1)
+
+            # convert from given (-1,1) to joint pos limits (low,high)
+            desired_joint_positions_scaled = (((desired_joint_positions - self.action_lows) * self.joint_pos_range) / self.action_range) + self.limits_lows_joint_pos
+
+        elif self.action_mode=='joint_delta_position':
+
+            # clip the incoming vel
+            delta_pos = np.clip(action, -1, 1)
+
+            # convert from given (-1,1) to joint vel limits (low,high)
+            delta_pos_scaled = (((delta_pos - self.action_lows) * self.joint_vel_range) / self.action_range) + self.limits_lows_joint_vel
+            
+            # turn the delta into an action position
+            curr_pos = self._get_joint_angles() 
+            desired_joint_positions_scaled = curr_pos + delta_pos_scaled
+            
 
         # enforce joint velocity limits on this scaled action
-        feasible_scaled_action = self.make_feasible(action_scaled)
+        feasible_scaled_action = self.make_feasible(desired_joint_positions_scaled)
 
         # take a step
         self._act(feasible_scaled_action, self.timestep)
@@ -122,8 +146,8 @@ class MslacReacherEnv(SawyerEnvBase):
         curr_positions = self._get_joint_angles()
 
         # compare the implied vel to the max vel allowed
-        max_vel = self.limits_joint_vel*self.timestep
-        implied_vel = np.abs(desired_positions-curr_positions)
+        max_vel = self.limits_highs_joint_vel*self.timestep #[7]
+        implied_vel = np.abs(desired_positions-curr_positions) #[7]
 
         # limit the vel 
         actual_vel = np.min([implied_vel, max_vel], axis=0)
