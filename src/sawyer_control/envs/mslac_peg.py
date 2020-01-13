@@ -15,6 +15,11 @@ class MslacPegInsertionEnv(SawyerEnvBase):
 
     '''
     Inserting a peg into a box (which is at a fixed location)
+
+    GOAL RIGHT NOW: 
+    x: 0.459949938269
+    y: 0.0171827931642
+    z: 0.195978444238
     '''
 
     def __init__(self, *args, **kwargs):

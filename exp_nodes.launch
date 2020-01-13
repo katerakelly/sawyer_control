@@ -3,7 +3,15 @@
     <node pkg="sawyer_control" type="actions_subscriber.py" name="actions"/>
     <node pkg="sawyer_control" type="observations_server.py" name="observations" />
     <node pkg="sawyer_control" type="jacobian_server.py" name="jacobians" />
-    <node pkg="sawyer_control" type="image_server.py" name="images" />
+    <!--     <node pkg="sawyer_control" type="image_server.py" name="images" /> -->
+    <node pkg="sawyer_control" type="image_server_webcam_ee.py" name="ee_webcam_images_node" output="screen"/>
+    <node pkg="sawyer_control" type="image_server_webcam_overall.py" name="overall_webcam_images_node" output="screen"/>
     <node pkg="sawyer_control" type="angle_action_server.py" name="angle_action" output="screen"/>
     <node pkg="sawyer_control" type="ik_server.py" name="ik_server" />
+
+    <node pkg="sawyer_control" type="forward_kinematics_server.py" name="ee_fk" />
+
+    <!-- publish from webcam to topic /webcam/image_raw -->
+    <include file="$(find sawyer_control)/ee_webcam_publish.launch" />
+    <include file="$(find sawyer_control)/overall_webcam_publish.launch" />
 </launch>

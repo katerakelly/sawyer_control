@@ -11,6 +11,11 @@ from sawyer_control.coordinates import quat_2_euler, euler_2_rot, euler_2_quat
 from sawyer_control.envs.sawyer_env_base import SawyerEnvBase
 from sawyer_control.core.serializable import Serializable
 
+import cv2
+import copy
+import rospy
+from sawyer_control.srv import image
+
 class MslacReacherEnv(SawyerEnvBase):
 
     '''
@@ -28,17 +33,28 @@ class MslacReacherEnv(SawyerEnvBase):
         self.num_joint_dof = 7
 
         # note: this env is currently written only for this mode
-        assert self.action_mode=='joint_position'
-        # TODO Tony create joint_delta_position
+        assert self.action_mode in ['joint_position', 'joint_delta_position']
 
         # vel limits
         joint_vel_lim = 0.07 #deg/sec
         self.limits_lows_joint_vel = -np.array([joint_vel_lim]*self.num_joint_dof)
         self.limits_highs_joint_vel = np.array([joint_vel_lim]*self.num_joint_dof)
 
-        # position limits
-        self.limits_lows_joint_pos = np.array([0, -0.9, -0.8, 1.6, 0.6, -0.7, -1.5])
-        self.limits_highs_joint_pos = np.array([0.3, -0.7, -0.1, 2.1, 2.7, 0.7, 1.5])
+        # position limits (tight)
+        # self.limits_lows_joint_pos = np.array([0, -0.9, -0.8, 1.6, 0.6, -0.7, -1.5])
+        # self.limits_highs_joint_pos = np.array([0.3, -0.7, -0.1, 2.1, 2.7, 0.7, 1.5])
+
+        # position limits (tight) with peg/camera attached
+        # self.limits_lows_joint_pos = np.array([0, -0.9, -0.8, 1.6, 0.6, -0.7, -1.5])
+        # self.limits_highs_joint_pos = np.array([0.3, -0.8, -0.3, 2.1, 2.7, 0.7, 1.5])
+
+        # position limits (loose, need safety box!)
+        self.limits_lows_joint_pos = np.array([0, -1, -1, 1.3, 0.6, -0.7, -1.5])
+        self.limits_highs_joint_pos = np.array([0.4, -0.6, 0, 2.5, 2.7, 0.7, 1.5])
+
+        # safety box (calculated for our current single-task peg setup)
+        self.safety_box_ee_low = np.array([0.36,-0.26,0.196])
+        self.safety_box_ee_high = np.array([0.8,0.26,0.5])
 
         # ee limits
         self.limits_lows_ee_pos = -1*np.ones(3)
@@ -60,13 +76,28 @@ class MslacReacherEnv(SawyerEnvBase):
         self.reset_duration = 4.0 # seconds to allow for reset
 
         # goal ee pose
-        self.goal_ee_position = np.array([0.5, -0.23, 0.47])
+        """
+        x: 0.417594278477
+        y: -0.224770123311
+        z: 0.314778205152
+        """
+        self.goal_ee_position = np.array([0.418, -0.225, 0.315])
 
         # reset robot to initialize
         self.reset()
 
+        # Added by Tony
+
+        self.sparse_reward = False  # TODO Tony: hardcoded. Also not expecting to run sparse reward on robot
+
     ####################################
     ####################################
+
+    # added by Tony
+    def override_action_mode(self, mode):
+        assert mode in ['joint_position', 'joint_delta_position']
+        self.action_mode = mode
+        print("ACTION MODE: ", self.action_mode)
 
     def _set_observation_space(self):
         ''' [14] : observation is [7] joint angles + [3] ee pos + [4] ee angles '''
@@ -83,10 +114,59 @@ class MslacReacherEnv(SawyerEnvBase):
     ####################################
     ####################################
 
-    def _get_image(self, width, height):
-        # TODO this function
-        # return self.get_image(im_width, im_height)
-        return np.ones((width,height,3))
+    def _get_image(self, width, height, double_camera):
+        if double_camera:
+            image =  self.get_double_image(width=width, height=height)
+        else:
+            image = self.get_image(width=width, height=height)
+        return image
+
+    def get_double_image(self, width=84, height=84): # override base_env, for double camera
+        ee_image = self.request_ee_image()
+        overall_image = self.request_overall_image()
+
+        input_w = 480 # input width
+        input_h = 640 # input height
+
+        if (overall_image is None) or (ee_image is None):
+            raise Exception('Unable to get one/both image(s) from image server')
+        ee_image = np.array(ee_image).reshape((input_w, input_h, 3))
+        ee_image = ee_image[:, :input_w]  # crop, so resize behaves correctly
+        overall_image = np.array(overall_image).reshape((input_w, input_h, 3))
+        overall_image = overall_image[:, :input_w]  # crop, so resize behaves correctly: now w * w
+
+        combined_image = self.combine_image(ee_image, overall_image)
+
+        combined_image = copy.deepcopy(combined_image)
+        combined_image = cv2.resize(combined_image, (0, 0), fx=width/(2*input_w), fy=height/input_w, interpolation=cv2.INTER_AREA)
+        combined_image = np.asarray(combined_image).reshape((width, height, 3))[:, :, ::-1]
+        return combined_image # np.expand_dims(combined_image, axis=0)
+
+    def combine_image(self, image1, image2):
+        """naive version"""
+        return np.concatenate((image1, image2), axis=0) # width * 2
+
+    def request_ee_image(self):
+        rospy.wait_for_service('images_webcam_ee')
+        try:
+            request = rospy.ServiceProxy('images_webcam_ee', image, persistent=True)
+            obs = request()
+            return (
+                    obs.image
+            )
+        except rospy.ServiceException as e:
+            print(e)
+
+    def request_overall_image(self):
+        rospy.wait_for_service('images_webcam_overall')
+        try:
+            request = rospy.ServiceProxy('images_webcam_overall', image, persistent=True)
+            obs = request()
+            return (
+                    obs.image
+            )
+        except rospy.ServiceException as e:
+            print(e)
 
     def _get_obs(self):
         ''' [7] joint angles + [7] ee pose (3 position, 4 angle quaternion)'''
@@ -98,9 +178,29 @@ class MslacReacherEnv(SawyerEnvBase):
     ####################################
 
     def compute_rewards(self, obs, action=None):
-        curr_ee_position = obs[self.num_joint_dof:self.num_joint_dof+3]
-        difference = curr_ee_position - self.goal_ee_position
-        reward = -np.linalg.norm(difference)
+        ee_xyz = obs[self.num_joint_dof:self.num_joint_dof+3]
+        goal_xyz = self.goal_ee_position
+
+        # distance between the points
+        score = np.linalg.norm(ee_xyz - goal_xyz)
+
+        #print("in hardware getting reward/score ", score, "TODO: make sure number is reasonable")
+
+        dist = 5*score
+
+        assert self.sparse_reward is False # for now
+
+        # # Sparse reward setting
+        # if self.sparse_reward:
+        #     dist = min(dist, self.truncation_dist) # if dist too large: return the reward at truncate_dist
+
+        # use GPS cost function: log + quadratic encourages precision near insertion
+        reward = -(dist ** 2 + math.log10(dist ** 2 + 1e-5))
+
+        # if self.sparse_reward:
+        #     # offset the whole reward such that when dist>truncation_dist, the reward will be exactly 0
+        #     reward = reward - (-(self.truncation_dist ** 2 + math.log10(self.truncation_dist ** 2 + 1e-5)))
+
         return reward
 
     def step(self, action):
@@ -116,14 +216,14 @@ class MslacReacherEnv(SawyerEnvBase):
         elif self.action_mode=='joint_delta_position':
 
             # clip the incoming vel
-            delta_pos = np.clip(action, -1, 1)
+            delta_joint_pos = np.clip(action, -1, 1)
 
-            # convert from given (-1,1) to joint vel limits (low,high)
-            delta_pos_scaled = (((delta_pos - self.action_lows) * self.joint_vel_range) / self.action_range) + self.limits_lows_joint_vel
+            # convert from given (-1,1) to joint vel limits (low,high) # tony: notice vel_range is actually delta range
+            delta_joint_pos_scaled = (((delta_joint_pos - self.action_lows) * self.joint_vel_range) / self.action_range) + self.limits_lows_joint_vel
             
             # turn the delta into an action position
             curr_pos = self._get_joint_angles() 
-            desired_joint_positions_scaled = curr_pos + delta_pos_scaled
+            desired_joint_positions_scaled = curr_pos + delta_joint_pos_scaled
             
 
         # enforce joint velocity limits on this scaled action
@@ -156,7 +256,22 @@ class MslacReacherEnv(SawyerEnvBase):
         sign = np.sign(desired_positions-curr_positions)
         actual_difference = sign*actual_vel
         feasible_positions = curr_positions+actual_difference
+
+        # find the actual position, taking safety box into account
+        feasible_positions = self.consider_safety_box(curr_positions, feasible_positions)
+
         return feasible_positions
+
+    def consider_safety_box(self, curr_joint_positions, desired_joint_positions):
+        # find desired_ee_position
+        transformation_matrix = self._get_ee_fk(desired_joint_positions)
+        desired_ee_position = np.array([transformation_matrix[3], transformation_matrix[7], transformation_matrix[11]])
+
+        # if that's outside safety box, don't move the robot
+        if np.any(desired_ee_position>self.safety_box_ee_high) or np.any(desired_ee_position<self.safety_box_ee_low):
+            return curr_joint_positions
+        else:
+            return desired_joint_positions
 
     def reset(self):
         # reset the arm to these positions

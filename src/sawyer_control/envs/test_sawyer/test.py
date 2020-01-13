@@ -210,6 +210,8 @@ rostopic echo -n 1 /robot/joint_states
   effort: [0.052, -0.424, -15.2, -1.672, -5.584, 0.304, 0.168, 0.052, 0.0]
 
 
+rostopic echo -n 1 /robot/limb/right/endpoint_state/pose/position
+
 rostopic echo -n 1 /robot/limb/right/endpoint_state
 	pose: 
 	  position: 

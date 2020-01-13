@@ -13,6 +13,7 @@ from sawyer_control.srv import getRobotPoseAndJacobian
 from sawyer_control.srv import ik
 from sawyer_control.srv import angle_action
 from sawyer_control.srv import image
+from sawyer_control.srv import eePose
 from sawyer_control.msg import actions
 
 ###############################
@@ -226,6 +227,18 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         self._state_goal = self.sample_goal()
         return self._get_obs()
 
+    def _get_ee_fk(self, joint_positions):
+
+        """ Returns a 4x4 homogeneous matrix for the R/T from base to ee"""
+        
+        rospy.wait_for_service('get_ee_fk')
+        try:
+            get_ee_fk = rospy.ServiceProxy('get_ee_fk', eePose, persistent=True)
+            output = get_ee_fk(joint_positions)
+            return output.endpoint_pose
+        except rospy.ServiceException as e:
+            print(e)
+
     def get_latest_pose_jacobian_dict(self):
         self.pose_jacobian_dict = self._get_robot_pose_jacobian_client()
 
@@ -382,9 +395,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         self.action_publisher.publish(action)
 
     def request_image(self):
-        rospy.wait_for_service('images')
+        rospy.wait_for_service('images_webcam_ee')
         try:
-            request = rospy.ServiceProxy('images', image, persistent=True)
+            request = rospy.ServiceProxy('images_webcam_ee', image, persistent=True)
             obs = request()
             return (
                     obs.image
@@ -402,10 +415,11 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         image = self.request_image()
         if image is None:
             raise Exception('Unable to get image from image server')
-        image = np.array(image).reshape(1000, 1000, 3)
+        image = np.array(image).reshape((480, 640, 3))
+        image = image[:,:480] #crop, so resize behaves correctly
         image = copy.deepcopy(image)
-        image = cv2.resize(image, (0, 0), fx=width/1000, fy=height/1000, interpolation=cv2.INTER_AREA)
-        image = np.asarray(image).reshape(width, height, 3)
+        image = cv2.resize(image, (0, 0), fx=width/480, fy=height/480, interpolation=cv2.INTER_AREA)
+        image = np.asarray(image).reshape((width, height, 3))
         return image
 
     def request_observation(self):
