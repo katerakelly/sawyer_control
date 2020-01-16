@@ -116,51 +116,35 @@ class MslacReacherEnv(SawyerEnvBase):
 
     def _get_image(self, width, height, double_camera):
         if double_camera:
-            image =  self.get_double_image(width=width, height=height)
+            image =  self.get_double_image(output_width=width, output_height=height)
         else:
             image = self.get_image(width=width, height=height)
         return image
 
-    def get_double_image(self, width=84, height=84): # override base_env, for double camera
-        ee_image = self.request_ee_image()
-        overall_image = self.request_overall_image()
+    def get_double_image(self, output_width=84, output_height=84): # override base_env, for double camera
+        double_image = self.request_double_image()
 
-        input_w = 480 # input width
+
+        input_w = 480*2 # input width
         input_h = 640 # input height
 
-        if (overall_image is None) or (ee_image is None):
-            raise Exception('Unable to get one/both image(s) from image server')
-        ee_image = np.array(ee_image).reshape((input_w, input_h, 3))
-        ee_image = ee_image[:, :input_w]  # crop, so resize behaves correctly
-        overall_image = np.array(overall_image).reshape((input_w, input_h, 3))
-        overall_image = overall_image[:, :input_w]  # crop, so resize behaves correctly: now w * w
+        if (double_image is None):
+            raise Exception('Unable to get double image(s) from image server')
+        double_image = np.array(double_image).reshape((input_w, input_h, 3))
+        double_image = double_image[:, :int(input_w/2), :]  # crop such that width:high = 2:1: make height: 640->480
 
-        combined_image = self.combine_image(ee_image, overall_image)
+        processed_w = input_w
+        processed_h = input_w/2
 
-        combined_image = copy.deepcopy(combined_image)
-        combined_image = cv2.resize(combined_image, (0, 0), fx=width/(2*input_w), fy=height/input_w, interpolation=cv2.INTER_AREA)
-        combined_image = np.asarray(combined_image).reshape((width, height, 3))[:, :, ::-1]
-        return combined_image # np.expand_dims(combined_image, axis=0)
+        double_image = copy.deepcopy(double_image)
+        double_image = cv2.resize(double_image, (0, 0), fx=output_width/processed_w, fy=output_height/processed_h, interpolation=cv2.INTER_AREA)
+        double_image = np.asarray(double_image).reshape((output_width, output_height, 3))[:, :, ::-1]
+        return double_image # np.expand_dims(combined_image, axis=0)
 
-    def combine_image(self, image1, image2):
-        """naive version"""
-        return np.concatenate((image1, image2), axis=0) # width * 2
-
-    def request_ee_image(self):
-        rospy.wait_for_service('images_webcam_ee')
+    def request_double_image(self):
+        rospy.wait_for_service('images_webcam_double')
         try:
-            request = rospy.ServiceProxy('images_webcam_ee', image, persistent=True)
-            obs = request()
-            return (
-                    obs.image
-            )
-        except rospy.ServiceException as e:
-            print(e)
-
-    def request_overall_image(self):
-        rospy.wait_for_service('images_webcam_overall')
-        try:
-            request = rospy.ServiceProxy('images_webcam_overall', image, persistent=True)
+            request = rospy.ServiceProxy('images_webcam_double', image, persistent=True)
             obs = request()
             return (
                     obs.image
@@ -274,8 +258,21 @@ class MslacReacherEnv(SawyerEnvBase):
             return desired_joint_positions
 
     def reset(self):
-        # reset the arm to these positions
+
+        # move upward to make sure not stuck
+        self._move_ee_upward()
+
+        # move to reset position
         self._act(self.reset_joint_positions, self.reset_duration, reset=True)
 
         # return the observation
         return self._get_obs()
+
+    def _move_ee_upward(self):
+        curr_ee_pose = self._get_endeffector_pose()
+        target_position = curr_ee_pose[:3] + np.array([0, 0, 0.05])
+        target_quat = curr_ee_pose[3:]
+        target_ee_pose = np.concatenate([target_position, target_quat])
+
+        angles = self.request_ik_angles(target_ee_pose, self._get_joint_angles())
+        self._act(angles, self.reset_duration, reset=True)

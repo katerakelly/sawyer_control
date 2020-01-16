@@ -6,8 +6,9 @@
     <!--     <node pkg="sawyer_control" type="image_server.py" name="images" /> -->
     <node pkg="sawyer_control" type="image_server_webcam_ee.py" name="ee_webcam_images_node" output="screen"/>
     <node pkg="sawyer_control" type="image_server_webcam_overall.py" name="overall_webcam_images_node" output="screen"/>
+    <node pkg="sawyer_control" type="image_server_webcam_double.py" name="double_webcam_images_node" output="screen"/>
     <node pkg="sawyer_control" type="angle_action_server.py" name="angle_action" output="screen"/>
-    <node pkg="sawyer_control" type="ik_server.py" name="ik_server" />
+    <node pkg="sawyer_control" type="ik_server.py" name="ik_server" output="screen"/>
 
     <node pkg="sawyer_control" type="forward_kinematics_server.py" name="ee_fk" />
 

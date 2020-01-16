@@ -395,9 +395,9 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         self.action_publisher.publish(action)
 
     def request_image(self):
-        rospy.wait_for_service('images_webcam_ee')
+        rospy.wait_for_service('images_webcam_overall')
         try:
-            request = rospy.ServiceProxy('images_webcam_ee', image, persistent=True)
+            request = rospy.ServiceProxy('images_webcam_overall', image, persistent=True)
             obs = request()
             return (
                     obs.image
@@ -476,11 +476,11 @@ class SawyerEnvBase(gym.Env, Serializable, MultitaskEnv, metaclass=abc.ABCMeta):
         except rospy.ServiceException as e:
             pass
 
-    def request_ik_angles(self, ee_pos, joint_angles):
+    def request_ik_angles(self, ee_pose, joint_angles):
         rospy.wait_for_service('ik')
         try:
             get_joint_angles = rospy.ServiceProxy('ik', ik, persistent=True)
-            resp = get_joint_angles(ee_pos, joint_angles)
+            resp = get_joint_angles(ee_pose, joint_angles)
 
             return (
                 resp.joint_angles
