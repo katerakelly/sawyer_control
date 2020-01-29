@@ -17,7 +17,7 @@ import copy
 import rospy
 from sawyer_control.srv import image
 
-class MslacPegInsertionEnv(SawyerEnvBase):
+class MslacPegInsertion3BoxEnv(SawyerEnvBase):
 
     '''
     Inserting a peg into a box (which is at a fixed location)
@@ -58,6 +58,11 @@ class MslacPegInsertionEnv(SawyerEnvBase):
         self.limits_lows_joint_pos = np.array([0, -1, -1, 1.3, 0.6, -0.7, -1.5])
         self.limits_highs_joint_pos = np.array([0.4, -0.6, 0, 2.5, 2.7, 0.7, 1.5])
 
+        # Added by Tony: reward limits
+        self.reward_low = np.array([-10]) # 10 is not precise, just as a big bounding box
+        self.reward_high = np.array([10])
+
+
         # safety box (calculated for our current single-task peg setup)
         self.safety_box_ee_low = np.array([0.36,-0.26,0.17])
         self.safety_box_ee_high = np.array([0.8,0.26,0.5])
@@ -88,14 +93,18 @@ class MslacPegInsertionEnv(SawyerEnvBase):
         # y: 0.0171827931642
         # z: 0.195978444238
 
-        # TODO just made this goal up
-        # self.goal_ee_position = np.array([ 0.51412338, -0.04801155,  0.20031133])
-        # # self.goal_ee = self.goal_ee_position
-        # self.goal_ee_orientation = np.array([1, 0, 0, 0])
-        # self.goal_ee = np.array([ 0.52665746, -0.03103374,  0.19041668,  0.10857889,  0.99396318, -0.01117118, -0.01108997])
-        self.goal_ee = np.array([0.53345484, 0.03079814, 0.17474512, 0.13870734, 0.99014252, 0.01770782, 0.00803156])
+        # goals from left to right
+        goal_ee_0 = np.array([ 0.52821296,  0.01280347,  0.18200512,  0.12290066,  0.99209726, 0.01588639, -0.0196502 ])
+        goal_ee_1 = np.array([ 0.58902162, -0.07332417,  0.18200512,  0.13149022,  0.99123251, -0.00978966,  0.00851821])
+        goal_ee_2 = np.array([ 0.44859862, -0.07167828,  0.18200512,  0.15853082,  0.98723805, -0.01287439, -0.00795511])
+
+
+        self.all_goals = [goal_ee_0, goal_ee_1, goal_ee_2]
+        self.goal_idx = None
+
 
         # reset robot to initialize
+        self.random_reset_goal()
         self.reset()
 
         # Added by Tony
@@ -105,6 +114,14 @@ class MslacPegInsertionEnv(SawyerEnvBase):
     ####################################
     ####################################
 
+    def random_reset_goal(self):
+        self.goal_idx = np.random.choice(range(len(self.all_goals)))
+        print("=====Set new goal, goal id:", self.goal_idx, "=====")
+
+    def set_task_for_env(self, task_idx):
+        print("=====Set new goal, goal id:", task_idx, "=====")
+        self.goal_idx = task_idx
+
     # added by Tony
     def override_action_mode(self, mode):
         assert mode in ['joint_position', 'joint_delta_position']
@@ -113,8 +130,8 @@ class MslacPegInsertionEnv(SawyerEnvBase):
 
     def _set_observation_space(self):
         ''' [14] : observation is [7] joint angles + [3] ee pos + [4] ee angles '''
-        self.obs_lows = np.concatenate((self.limits_lows_joint_pos, self.limits_lows_ee_pos, self.limits_lows_ee_angles))
-        self.obs_highs = np.concatenate((self.limits_highs_joint_pos, self.limits_highs_ee_pos, self.limits_highs_ee_angles))
+        self.obs_lows = np.concatenate((self.limits_lows_joint_pos, self.limits_lows_ee_pos, self.limits_lows_ee_angles, self.reward_low))
+        self.obs_highs = np.concatenate((self.limits_highs_joint_pos, self.limits_highs_ee_pos, self.limits_highs_ee_angles, self.reward_high))
         self.observation_space = Box(self.obs_lows, self.obs_highs, dtype=np.float32)
 
     def _set_action_space(self):
@@ -182,7 +199,7 @@ class MslacPegInsertionEnv(SawyerEnvBase):
     def compute_rewards(self, obs, action=None):
         # want indices 7-13
         ee_pose = obs[self.num_joint_dof:self.num_joint_dof+7] # same as env._get_endeffector_pose(): gives 3 + 4
-        goal_pose = self.goal_ee
+        goal_pose = self.all_goals[self.goal_idx]
 
         # distance between the points
         score_dist = np.linalg.norm(ee_pose[:3] - goal_pose[:3])
@@ -211,7 +228,6 @@ class MslacPegInsertionEnv(SawyerEnvBase):
         #     reward = reward - (-(self.truncation_dist ** 2 + math.log10(self.truncation_dist ** 2 + 1e-5)))
 
         # print(reward)
-
         return reward
 
     def step(self, action):
@@ -250,6 +266,9 @@ class MslacPegInsertionEnv(SawyerEnvBase):
         reward = self.compute_rewards(obs)
         done = False
         info = None #self._get_info()
+
+        obs = np.concatenate((obs, np.array([reward]))) # NOTICE
+
         return obs, reward, done, info
 
     def make_feasible(self, desired_positions):
@@ -289,11 +308,16 @@ class MslacPegInsertionEnv(SawyerEnvBase):
         # move upward to make sure not stuck
         self._move_ee_upward()
 
+        # self.reset_goal()
+
         # move to reset position
         self._act(self.reset_joint_positions, self.reset_duration*1.5, reset=True)
 
         # return the observation
-        return self._get_obs()
+        ob = self._get_obs()
+        ob = np.concatenate((ob, np.array([0])))
+
+        return ob
 
     def _move_ee_upward(self):
         curr_ee_pose = self._get_endeffector_pose()
